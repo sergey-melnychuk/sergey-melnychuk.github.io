@@ -1,0 +1,42 @@
+---
+layout: post
+title:  "The mythical 10x engineer"
+date:   2022-09-15 06:57:42 +0200
+categories: software engineering 10x
+---
+
+The 10x engineer - whole industry was discussing it, laughing at it, learning how to become it quite for some time. Googling "10x engineer" gives tons of content (as probably with any other catch-phrase), including some stuff to [watch](https://www.youtube.com/watch?v=Iydpa_gPdes) and [read](https://a16z.com/2014/07/30/the-happy-demise-of-the-10x-engineer/). Quite a lot whas told & written about it, but I feel the World needs one more post on the topic!
+
+// TL/DR: The 10x engineer just knows which 90% of work **not** to do.
+
+At this point after more than 12 years in the industry, I feel that some patterns emerged and crystalized about how the work is done in various environments by various people. With time, I clearly see that in software engineering (where you can build pretty much everythin you can think of, with some limitations mostly in accounting and physics departments) it is more important to choose what **not** to do rather that what to do. By "doing" I mean actually investing time and effort: designing, writing code, fixing it, building pipelines, setting up environments, and eventually, running it in production environment (or any other environment where it can add some value).
+
+Putting it to extreme: probably the worst thing one can do when solving a software engineering task at work is to start writing code. Of course the task needs to be understood first, then necesasry trade-offs selected, the suggested approach verified and designed, then the design reviewed by other engineers. After that the easy part comes in - writing code. The art of (software) engineering IMO is to see the problem behind the task and understand how exactly it needs to be solved (the purpose of the solution). Without such "homework" done, pretty much all the efforts are wasted (unless it is a prototying/research efforts to start with of course). As if all you have is a hammer, every problem looks like a nail, [right](https://en.wikipedia.org/wiki/Law_of_the_instrument)?
+
+It is so obvious I even feel weird writing about it. Yet if it is so obvious to everyone, why there are some many failed software projects around? Even when [the answers](https://en.wikipedia.org/wiki/The_Mythical_Man-Month) are available since 1975? (Feel free to put into comments: if you read the book and the result of substraction 1975 from the year you were born). Yet engineering management is totally different from software engineering itself, I still can help but notice the same main goal: choose which things **not** to do. When the deadline is (too) close, the rational decision would be to drop stories out of the backlog, isn't it? (If it does not seem rational to you - just read the damn book already).
+
+How to define what 10x engineer is about? I think 2 questions about an engineer and their work is enough:
+1. Can [an engineer] get the work done alone? 
+  - Alone meaning without (constant) supervision.
+  - If a person can plan/align their workload efficiently, there might be a good chance such person can organize small (or maybe not so small) teams work as well.
+1. Is the work [done by the engineer] being redone necessary?
+  - If yes, then usually by more senior colleagues.
+  - Solution might solve the problem, but might be too complex or have limited scalability.
+
+These 2 questions give 4 quadrants, I will use `ALONE` (`true` if an engineer can work alone) and `REDONE` (`true` if work needs to be redone) as booleans to distinguish quadrants:
+* `!ALONE && REDONE`: Usually Junior Engineers land here, they need supervision and often a few iterations of polishing is required (which is not necessary a bad thing - it allows sustainable learning and improvement).
+* `!ALONE && !REDONE`: Junior+/Middle Engineers who require little-to-no supervision (yet still most likely require at least some) and produce production-ready code without significant issues. I'd say starting from here most of the routine tasks can be offloaded to the tooling (auto-formatters, test-coverage analyzers, statical analyzers, various sanitizers and profilers, and other stuff like that).
+* `ALONE && REDONE`: Tricky one, I think this quadrant is the result of something like ["Second System Effect"](https://en.wikipedia.org/wiki/Second-system_effect) but at a much smaller scale. I regularly visit this quadrant, to be honest, but with some self-awareness it become quite easy to catch drift in this direction early.
+* `ALONE && !REDONE`: It seems rational to hunt the beast we're looking for in this quadrant. Senior Engineers, consistent performers who get the job done live here. Is it enough to land here to become 10x engineer? Maybe. I don't know! Noone really knows for sure.
+
+So how to distinguish a 10x engineer and a 1x one, both living in `ALONE && !REDONE` quadrant? I think that "remaining" 9x is where to look for the answer. I think deep understanding of what is happening and why allows mythical 10x engineer to consistently avoid doing unnecessary 90% of work! Almost like [Pareto principle](https://en.wikipedia.org/wiki/Pareto_principle) but with numbers twisted to match 10/90 breakdown instead of 20/80 :) I've seen tons of efforts wasted on solving problems that simply do not have to exist at all! Like the ones below (don't get me wrong, not only *someone else* does it wrong, some of those are also my mistakes):
+- Choosing non-ACID-compliant database and implementing "manual consistency" on top of it
+- Making all the code (even strictly CPU-bound) async and then struggling to extend it
+- Blocking the executor threads of reactive app and then struggle with poor performance
+- Leaking of the implementation details into the domain model and failing to reuse code
+- Designing everything to work on single instance only and failing to scale out
+- Choosing tools that simply are not fit for the job and "tweaking" them constantly
+
+Those problems, that should have never existed in the first place, can easily dominate the effort invested in the project and IMO can as easily go to 90% of all work done on the project, as such problems tend to compound, effectively setting up the foundations for [Diminishing Returns](https://en.wikipedia.org/wiki/Diminishing_returns). The mythical 10x engineer can foresee such problems and avoid them. This is how the work on the project gets done 10x faster, compared to projects where 90% of efforts are wasted due to a bloated backlog full of problems that could have been avoided. So to summarize: it seems it is more important what **not** to do, what code **not** to write and what feature **not** to ship.
+
+Is it the perfect definition of a mythical 10x engineer? Probably not. But I think each and everyone involved in software engineering might benefit significantly by using "how mythical 10x engineer would solve that?" and "how can we avoid doing that?" mental models and looking for a ways to make solution more simple rather than more complex. Just like in [TRIZ](https://pl.wikipedia.org/wiki/TRIZ): "The ideal system is the one that does not even exist, yet its function is being performed".
