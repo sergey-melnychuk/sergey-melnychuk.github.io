@@ -4,5 +4,4 @@ title: "About"
 permalink: /about/
 ---
 
-Software Engineer
-
+I'm a Software Development Engineer!

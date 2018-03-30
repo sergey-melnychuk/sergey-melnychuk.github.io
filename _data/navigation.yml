@@ -5,6 +5,7 @@ main:
     url: /about/
   - title: "Archives"
     url: /archives/
+  - title: "LinkedIn"
+    url: https://www.linkedin.com/in/sergeymelnychuk/
   - title: "GitHub"
     url: https://github.com/sergey-melnychuk
-
