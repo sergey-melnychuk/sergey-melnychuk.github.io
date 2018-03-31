@@ -29,22 +29,12 @@ markdown: kramdown
 theme: jekyll-whiteglass
 remote_theme: jekyll-whiteglass
 plugins:
-  - jekyll-archives
   - jekyll-paginate
   - jekyll-sitemap
 
 permalink: /:year/:month/:day/:title/
 paginate_path: /posts/:num/
 paginate: 5
-
-jekyll-archives:
-  enabled:
-    - categories
-    - tags
-  layout: category_archives
-  permalinks:
-    category: /categories/:name/
-    tag: /tags/:name/
 
 # Exclude from processing.
 # The following items will not be processed, by default. Create a custom list

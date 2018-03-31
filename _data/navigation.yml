@@ -3,8 +3,6 @@
 main:
   - title: "About"
     url: /about/
-  - title: "Archives"
-    url: /archives/
   - title: "LinkedIn"
     url: https://www.linkedin.com/in/sergeymelnychuk/
   - title: "GitHub"
