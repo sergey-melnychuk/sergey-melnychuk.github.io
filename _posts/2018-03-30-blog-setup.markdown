@@ -15,7 +15,7 @@ Text decorations include **bold**, *italic*, ~~crossed out~~. And can be propaga
 Links can be included [in place!](http://google.com)
 
 1. Numbered lists
-1. are created with `1. ` prefix
+1. are created with `1.` prefix
 1. at the begining of each list item
 1. then these prefixes
 1. are turn into proper list index
@@ -62,8 +62,8 @@ public class Main {
 ```
 
 Nice thing to have is a task list:
-[x] this is completed item
-[ ] this is not-completed item
+- [x] this is completed item
+- [ ] this is not-completed item
 
 Tables can be useful as well:
 
