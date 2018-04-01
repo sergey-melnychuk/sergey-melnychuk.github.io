@@ -15,8 +15,10 @@ Text decorations include **bold**, *italic*, ~~crossed out~~. And can be propaga
 Links can be included [in place!](http://google.com)
 
 1. Numbered lists
-1. are created with one-point prefix
-1. and are turn into indices
+1. are created with `1. ` prefix
+1. at the begining of each list item
+1. then these prefixes
+1. are turn into proper list index
 
 - Bullet points
 - are created with dashes
@@ -24,7 +26,7 @@ Links can be included [in place!](http://google.com)
   - and can be intented
   - using two spaces
   - before the dash char
-  - in sub-lists
+  - for sub-lists
   
 Images are added in a way similar to links (source: [imgur](https://imgur.com/XhME3))
 ![Random image on the Internet](https://i.imgur.com/XhME3.jpg)
@@ -60,8 +62,8 @@ public class Main {
 ```
 
 Nice thing to have is a task list:
-- [x] this is completed item
-- [ ] this is not-completed item
+[x] this is completed item
+[ ] this is not-completed item
 
 Tables can be useful as well:
 
@@ -71,8 +73,16 @@ Red | Stop
 Yellow | Think again
 Green | Go
 
+Important thing to note here is that Jekyll Archives plugin is not supported in GitHub Pages, so I got it removed from the blog. For more details:
+* [Pull request][archives-pull] for Jekyll Archives support
+* [Comment][archives-comment] regarding why it is not supported
+* [Solution][archives-solution] to add archives support
+
 [github-pages]:  https://pages.github.com/
 [jekyll-docs]:   https://jekyllrb.com/docs/home/
 [jekyll-setup]:  https://jekyllrb.com/docs/troubleshooting/
 [jekyll-theme]:  https://yous.be/whiteglass/about/
 [markdown-link]: https://guides.github.com/features/mastering-markdown/
+[archives-pull]: https://github.com/github/pages-gem/issues/93
+[archives-comment]: https://github.com/github/pages-gem/pull/106#issuecomment-69336195
+[archives-solution]: http://mrloh.se/2015/06/automatic-archives-for-jekyll-on-github-pages/
