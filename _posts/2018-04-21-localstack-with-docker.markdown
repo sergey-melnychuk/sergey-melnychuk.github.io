@@ -8,7 +8,7 @@ Using AWS SDK always leaves one question open for me - how to introduce test cov
 
 TL;DR [code][code-github]
 
-One thing I knew for sure, is that I'm not the first one asking this question, and I indeed wasn't. No better option comes to mind then introduce integration test against 'real' 3rd-party system. Of course, there aren't more real AWS endpoint than the real AWS endpoint, but paying for _each_ run of the test doesn't seem like a wise option to me.
+One thing I knew for sure, is that I'm not the first one asking this question, and I indeed wasn't. No better option comes to mind then introduce integration test against 'real' 3rd-party system. Of course, there is no more real AWS endpoint than the real AWS endpoint, but paying for _each_ run of the test doesn't seem like a wise option to me.
 
 Right next after the real AWS in the list of real AWS endpoints, comes [LocalStack][localstack-home]. It allows you to spin up local endpoints that implement AWS services contracts. Someone finally made their own AWS endpoints and allows you to spin it up at your localhost for free! Installation and available services are very well [described][localstack-github], so I won't cover it here. If you messed up with your local python installation (as I did apparently), it might be useful to read [this][localstack-install].
 
@@ -199,7 +199,7 @@ public class FileServiceImpl implements FileService {
 }
 ```
 
-FileService requires AmazonS3 instance, and I don't want the users of FileService to even know about such implementation detail as S3 client running under the hood of my super-useful FileService! Nice thing to have would be some service, that can provide me an instance of FileService. "Factory" you're probably thinking right now, and you're right.
+FileService requires AmazonS3 instance, and I don't want the users of FileService to even know about such implementation detail as S3 client running under the hood of my super-useful FileService! Some service that can provide me an instance of a FileService would be a nice thing to have. "Factory" you're probably thinking right now, and you're right.
 
 ```java
 package edu.blog.service;
@@ -365,7 +365,7 @@ Let's play a bit with localstack docker container. Specifically I am interested 
 ]
 ```
 
-Representing similar container configuration using docker-java API is shown below. Note usage utility functions `getTmpDir`. Delaying for a few seconds after container is started is necessary to make sure all localstack start-up and initialization routines are completed before usign the provided services.
+Representing similar container configuration using docker-java API is shown below. Note usage utility functions `getTmpDir`. Delaying for a few seconds after container is started is necessary to make sure all localstack start-up and initialization routines are completed before using the provided services.
 
 ```java
 DockerClientConfig config = DefaultDockerClientConfig.createDefaultConfigBuilder()
@@ -408,7 +408,7 @@ containerId = container.getId();
 docker.startContainerCmd(containerId).exec();
 ```
 
-Once tests are finished, to stor and remove container these two line is enough.
+Once tests are finished, to stor and remove container these two lines is enough.
 
 ```java
 docker.stopContainerCmd(containerId).exec();
