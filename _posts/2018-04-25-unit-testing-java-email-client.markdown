@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Unit-testing Java Email Client"
-date:   2018-04-21 12:18:00 +0200
+date:   2018-04-25 12:18:00 +0200
 categories: java email testing
 ---
 When you need to send email with Java code, good old SMTP and javax.mail package do all the work. 
