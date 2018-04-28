@@ -17,6 +17,7 @@ I know Dijkstra, Tarjan, Kruskal, Prim and more famous surnames.
 
 I know how to implement gossip, membership, quorum and replication protocols among connected nodes.
 
-I know how to make machine to learn to detect if there's a cat on the picture.
+I know how to make machine learn to detect if there's a cat on the picture.
 
 I know how deep learning can be and how large CNNs RNNs can grow.
+
