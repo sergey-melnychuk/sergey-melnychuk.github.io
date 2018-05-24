@@ -98,7 +98,7 @@ assertEquals("payload.json.zip", multipart.getBodyPart(1).getFileName());
 Map<String, String> data = unzip(multipart.getBodyPart(1).getInputStream());
 assertEquals(1, data.size());
 assertTrue(data.containsKey("payload.json"));
-assertEquals("{\"attached\":true}", data0.get("payload.json"));
+assertEquals("{\"attached\":true}", data.get("payload.json"));
 
 wiser.stop();
 ```
