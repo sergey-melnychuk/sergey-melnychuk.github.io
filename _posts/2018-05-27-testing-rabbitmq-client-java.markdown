@@ -2,13 +2,13 @@
 layout: post
 title:  "Testing RabbitMQ Client in Java"
 date:   2018-05-27 15:35:00 +0200
-categories: java email testing
+categories: java rabbitmq queue testing
 ---
 Writing RabbitMQ client in Java is very well described in the [tutorial][rabbit-java-tutorial] and client [docs][rabbit-java-client], but writing test-coverage for such client can be tricky.
 
 It makes sense to test message queue client against real message queue, and it makes sense to pick the message queue broker that can be embedded into tests code. The answer I found is Apache [QPID][apache-qpid].
 
-Next in this post I will show how to set up embedded qpid broker and run send/receive test workload against it. Here I will provide the full solution without much comments (as it is very clear), but for more details like broker configuration etc the qpid [docs][qpid-java-broker] is a good starting point.
+Next in this post I will show how to set up embedded QPID broker and run send/receive test workload against it. Here I will provide the full solution without much comments (as it is extremely straightforward), but for more details like broker configuration etc the QPID [docs][qpid-java-broker] is a good starting point.
 
 This is how to add required Java dependencies using Gradle.
 
@@ -17,7 +17,7 @@ compile('com.rabbitmq:amqp-client:5.0.0')
 testCompile('org.apache.qpid:qpid-broker:6.1.4')
 ```
 
-This is qpid broker configuration file that will be used for this example.
+This is QPID broker configuration file that will be used for this example.
 
 ```json
 {
@@ -143,16 +143,16 @@ public class RabbitClient implements Supplier<String>, Consumer<String> {
         if (config.useSsl) {
             try {
                 this.connectionFactory.useSslProtocol();
-            } catch (NoSuchAlgorithmException | KeyManagementException e) {
+            } catch (Exception e) {
                 logger.error("Error when enabling SSL", e);
             }
         }
     }
 
     private String withConnection(Function<Connection, String> block) {
-        try (Connection connection = connectionFactory.newConnection();) {
+        try (Connection connection = connectionFactory.newConnection()) {
             return block.apply(connection);
-        } catch (IOException | TimeoutException e) {
+        } catch (Exception e) {
             logger.error("Error during using rabbit connection", e);
             return null;
         }
@@ -171,7 +171,7 @@ public class RabbitClient implements Supplier<String>, Consumer<String> {
                     true,
                     MessageProperties.PERSISTENT_TEXT_PLAIN,
                     payload.getBytes());
-            } catch (TimeoutException | IOException e) {
+            } catch (Exception e) {
                 logger.error("Creating rabbit channel failed", e);
             }
             return null;
@@ -193,7 +193,7 @@ public class RabbitClient implements Supplier<String>, Consumer<String> {
                     return new String(body);
                 }
                 return null;
-            } catch (IOException | TimeoutException e) {
+            } catch (Exception e) {
                 logger.error("Creating rabbit channel failed", e);
                 return null;
             }
@@ -208,10 +208,26 @@ And finally the piece of code that checks that send() and receive() work as expe
 public class RabbitClientTests {
     private static final Logger logger = LoggerFactory.getLogger(RabbitClientTests.class);
 
-    private static final Broker broker = new Broker();
-
     private static final RabbitClient.Config config = new RabbitClient.Config(
         "localhost", 5672, "/", "guest", "guest", "q", "X", "key", true);
+
+    private static final ConnectionFactory cf = new ConnectionFactory();
+    static {
+        cf.setUsername(config.username);
+        cf.setPassword(config.password);
+        cf.setHost(config.host);
+        cf.setPort(config.port);
+        cf.setVirtualHost(config.virtualHost);
+        if (config.useSsl) {
+            try {
+                cf.useSslProtocol();
+            } catch (NoSuchAlgorithmException | KeyManagementException e) {
+                logger.error("Error when enabling SSL", e);
+            }
+        }
+    }
+
+    private static final Broker broker = new Broker();
 
     @BeforeClass
     public static void beforeClass() throws Exception {
@@ -225,50 +241,22 @@ public class RabbitClientTests {
         broker.shutdown();
     }
 
-    private static void send(String message) throws Exception {
-        ConnectionFactory connectionFactory = new ConnectionFactory();
-        connectionFactory.setUsername(config.username);
-        connectionFactory.setPassword(config.password);
-        connectionFactory.setHost(config.host);
-        connectionFactory.setPort(config.port);
-        connectionFactory.setVirtualHost(config.virtualHost);
-        if (config.useSsl) {
-            try {
-                connectionFactory.useSslProtocol();
-            } catch (NoSuchAlgorithmException | KeyManagementException e) {
-                logger.error("Error when enabling SSL", e);
-            }
-        }
+    private static Channel getChannel() throws Exception {
+      Connection connection = cf.newConnection();
+      Channel channel = connection.createChannel();
+      channel.exchangeDeclare(config.exchangeName, "direct", true);
+      channel.queueDeclare(config.queueName, false, false, false, null);
+      channel.queueBind(config.queueName, config.exchangeName, config.routingKey);
+      return channel;
+    }
 
-        Connection connection = connectionFactory.newConnection();
-        Channel channel = connection.createChannel();
-        channel.exchangeDeclare(config.exchangeName, "direct", true);
-        channel.queueDeclare(config.queueName, false, false, false, null);
-        channel.queueBind(config.queueName, config.exchangeName, config.routingKey);
+    private static void send(String message) throws Exception {
+        Channel channel = getChannel();
         channel.basicPublish(config.exchangeName, config.routingKey, null, message.getBytes());
     }
 
     private static String recv() throws Exception {
-        ConnectionFactory connectionFactory = new ConnectionFactory();
-        connectionFactory.setUsername(config.username);
-        connectionFactory.setPassword(config.password);
-        connectionFactory.setHost(config.host);
-        connectionFactory.setPort(config.port);
-        connectionFactory.setVirtualHost(config.virtualHost);
-        if (config.useSsl) {
-            try {
-                connectionFactory.useSslProtocol();
-            } catch (NoSuchAlgorithmException | KeyManagementException e) {
-                logger.error("Error when enabling SSL", e);
-            }
-        }
-
-        Connection connection = connectionFactory.newConnection();
-        Channel channel = connection.createChannel();
-        channel.exchangeDeclare(config.exchangeName, "direct", true);
-        channel.queueDeclare(config.queueName, false, false, false, null);
-        channel.queueBind(config.queueName, config.exchangeName, config.routingKey);
-
+        Channel channel = getChannel();
         GetResponse response = channel.basicGet(config.queueName, true);
         return new String(response.getBody());
     }
@@ -291,7 +279,7 @@ public class RabbitClientTests {
 }
 ```
 
-This is how one can test RabbitMQ client. Clear and withoud much comments, as promised.
+This is how one can test RabbitMQ client. Clear and without much comments, as promised.
 
 [rabbit-java-tutorial]: https://www.rabbitmq.com/tutorials/tutorial-one-java.html
 [rabbit-java-client]: https://www.rabbitmq.com/java-client.html
