@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Command prompt setup"
-date:   2018-05-29 18:31:00 +0200
+date:   2018-06-03 17:56:00 +0200
 categories: command prompt, git branch
 ---
 Quite for some time I was taking command prompt for granted, thinking that it is just as it is. But today is the day, I'm setting up the command prompt that I like!
