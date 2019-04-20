@@ -9,7 +9,7 @@ Quite for some time I was thinking about refreshing Akka skills and providing so
 
 TL;DR: [code][the-code]
 
-The rules are very simple, the current state of a cell on a two-dimentional grid depends only on previous state of the call and a number of "alive" cells among surrounding 8 neighbors cells (immediate vertical, horizontal and diagonal adjacent cells). The implementation in Scala looks like this:
+The rules are very simple, the current state of a cell on a two-dimentional grid depends only on previous state of the cell and a number of "alive" cells among surrounding 8 neighbors cells (immediate vertical, horizontal and diagonal adjacent cells). The implementation in Scala looks like this:
 
 ```scala
 object Cell {
