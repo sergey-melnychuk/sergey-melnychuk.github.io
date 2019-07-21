@@ -32,3 +32,15 @@ $ ssh -i ~/.ssh/key_rsa key@$IP -p 2222
 
 Nice!
 
+UPDATE:
+
+Some useful [tip][sshd-config] on configuration `/etc/ssh/sshd` on VPC instance:
+```
+AllowTcpForwarding yes
+TCPKeepAlive yes
+```
+
+Explanation of sshd `-R` [flag][ssh-R-flag].
+
+[sshd-config]: https://unix.stackexchange.com/a/17836
+[ssh-R-flag]: https://superuser.com/a/591963
