@@ -3,4 +3,8 @@ layout: page
 title: "About"
 permalink: /about/
 ---
-I build things. Software things mostly. Since 2010.
+
+Building software since 1999.
+
+Getting paid by building software since 2010.
+
