@@ -99,6 +99,14 @@ error)! When encountered, such error simply means that there are no more incomin
 connections waiting to be accepted at this point, so the loop is broken, and next 
 events get processed.
 
+Now if I run the server and try connecting to it, I can see Discard Protocol in 
+action! Amazing right?!
+
+```
+$ nc 127.0.0.1 8080
+$ 
+```
+
 ### Registering connections for events
 
 Speaking of next events. In order for next events to occur, they must be registered 
@@ -115,7 +123,7 @@ it is inserted into the hash-map.
 
 ```rust
 let mut counter: usize = 0;
-let mut sockets: HashMap<Token, TcpStreak> = HashMap::new();
+let mut sockets: HashMap<Token, TcpStream> = HashMap::new();
 
 // handle the event
 match event.token() {
@@ -222,7 +230,7 @@ implement some *protocol*.
 
 ### How do I implement a protocol?
 
-OK, I just want to send text or JSON back, and TCP is a [protocol][protocol-doc], 
+OK, I just want to send text (or JSON) back, and TCP is a [protocol][protocol-doc], 
 why do I need more? Well, [TCP][tcp-doc] *is* a protocol, the Transmission Control 
 Protocol, the transport-level one. TCP cares about receiver to receive exact
 amount of bytes in exact order that sender sent! So at the transport level, I have
@@ -239,11 +247,136 @@ Here I won't bother with actually implementing HTTP, what I'm going to do instea
 is to make my server behave as if it really understands GET requests, but will 
 always respond to such request with a response containing 6 bytes: `b"hello\n"`.
 
-### What I am about to GET
+If I want all my protocol to do is to return how many bytes were received, I will 
+need an actual number of bytes written (`HashMap` will do), count bytes when 
+readable event occurs, then schedule a one-shot writable event, and when writable
+event occurs - send the response and drop the connection.
 
+```rust
+let mut response: HashMap<Token, usize> = HashMap::new();
+...
+token if event.readiness().is_readable() => {
+    let mut bytes_read: usize = 0;
+    loop {
+        ... // sum up number of bytes received
+    }
+    response.insert(token, bytes_read);
+    // re-register for oneshot writable event
+}
+...
+token if event.readiness().is_writable() => {
+    let n_bytes = response[&token];
+    let message = format!("Received {} bytes\n", n_bytes);
+    sockets.get_mut(&token).unwrap().write_all(message.as_bytes()).unwrap();
+    response.remove(&token);
+    sockets.remove(&token); // Drop the connection
+},
+```
+
+### Mocking HTTP
+
+For the sake of this article, mocking of HTTP is more than enough. I will use the 
+fact that HTTP request header is separated from request body (if any) with 4 bytes, 
+`\r\n\r\n`. So if I keep track of what current client have sent, and if at any point 
+there are target 4 bytes in there, I can respond with pre-defined HTTP response:
+
+```
+HTTP/1.1 200 OK
+Content-Type: text/html
+Connection: keep-alive
+Content-Length: 6
+
+hello
+```
+
+Simple `HashMap` is enough to keep track of all the bytes received:
+
+```rust
+let mut requests: HashMap<Token, Vec<u8>> = HashMap::new();
+```
+
+Once reading is done, it makes sense to check if request is ready:
+
+```rust
+fn is_double_crnl(window: &[u8]) -> bool {  /* trivial */ }
+
+let ready = requests.get(&token).unwrap()
+    .windows(4)
+    .find(|window| is_double_crnl(*window))
+    .is_some();
+```
+
+And if it is, it's time to schedule some writing!
+
+```rust
+if ready {
+    let socket = sockets.get(&token).unwrap();
+    poll.reregister(
+        socket,
+        token,
+        Ready::writable(),
+        PollOpt::edge() | PollOpt::oneshot()).unwrap();
+}
+```
+
+After writing is completed, it is important to keep the connection open, and 
+`reregister` socket for reading again.
+ 
+```rust
+poll.reregister(
+    sockets.get(&token).unwrap(),
+    token,
+    Ready::readable(),
+    PollOpt::edge()).unwrap();
+```
+
+Server is ready!
+
+```
+$ curl localhost:8080
+hello
+```
+
+So the fun can start - let's try an see how performant this *single-threaded* 
+server is with common tools: `ab` and `wrk`. Note: `ab` requires `-k` option to
+use `keep-alive` and reuse existing connections.
+
+Here are the numbers I got when trying benchmarking on the instance 
+`TODO` of some cloud provider 
+(that I'm not really allowed to mention here).
+
+```
+$ ab -n 1000000 -c 128 -k http://127.0.0.1:8080/
+<snip>
 TODO
+```
 
-[the-code]: TODO
+```
+$ $ wrk -d 30s -t 4 -c 128 http://127.0.0.1:8080/
+<snip>
+TODO
+```
+
+Not bad for a single thread!
+
+Of course, it is cheating, and one thing that's benchmarked is actually throughput
+between user and kernel space, since no single byte actually hits the network. But 
+still, this can be a (more or less) meaningful bottom line for how fast networking
+can be done using only one thread.
+
+The full and runnable code is available on [github][the-code], organized by one
+logical chapter per pull-request:
+* init project: [PR#1](https://github.com/sergey-melnychuk/mio-tcp-server/pull/1)
+* accept & discard: [PR#2](https://github.com/sergey-melnychuk/mio-tcp-server/pull/2)
+* read from socket: [PR#3](https://github.com/sergey-melnychuk/mio-tcp-server/pull/3)
+* writing to socket: [PR#4](https://github.com/sergey-melnychuk/mio-tcp-server/pull/4)
+* mocking HTTP: [PR#5](https://github.com/sergey-melnychuk/mio-tcp-server/pull/5)
+
+### Where to go from here
+
+Scaling to multiple threads: read [this](https://blog.cloudflare.com/the-sad-state-of-linux-socket-balancing/).
+
+[the-code]: https://github.com/sergey-melnychuk/mio-tcp-server
 [mio-github]: https://github.com/tokio-rs/mio
 [edge-level]: https://en.wikipedia.org/wiki/Epoll#Triggering_modes
 [discard]: https://en.wikipedia.org/wiki/Discard_Protocol
