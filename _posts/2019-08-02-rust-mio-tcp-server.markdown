@@ -10,7 +10,7 @@ abstraction over epoll/kqueue written in Rust.
 TL;DR: [github][the-code].
 
 In this article I will show and explain how to write simple single-threaded 
-asynchronous TCP server, and make it like it can understand HTTP, and then 
+asynchronous TCP server, then teach it to mock HTTP protocol, and then 
 benchmark it with `ab`/`wrk`. The results are about to be impressive.
 
 ### Getting started
@@ -53,12 +53,12 @@ loop {
 ### Accepting connections (and dropping them)
 
 The event can be one of the following:
-* readable event on the listener - means that there are incomint connections that 
-are ready to be accepted by the listener
+* readable event on the listener means that there are incoming connections that 
+are ready to be accepted
 * event on the connected socket
   * readable - the socket has data available for reading
   * writable - the socket is ready for writing some data into it
-  
+
 The listener vs socket event can be distinguished by token, where for the listener 
 token is always zero, as it was registered in `Poll`.
 
@@ -89,11 +89,11 @@ match event.token() {
 }
 ```
 
-Listener's `.accept()` returns `std::io::Result<Option<(TcpStream, SocketAddr)>>` 
-(as described [here][accept-docs]), and I'm interested in matching only cases when 
-non-empty option is returned, or an error. But there is special kind of error 
+Listener's `.accept()` returns `std::io::Result<(TcpStream, SocketAddr)>` 
+(as described [here][accept-docs]), so I have to match and process successful 
+response or an error. But there is special kind of error 
 `io::ErrorKind::WouldBlock` ([doc][wouldblock]), that's basically saying "I'm 
-about to wait (block) to make further progress". This is the essential of 
+about to wait (block) to make any progress". This is the essential of 
 non-blocking behaviour - the point is just not to block (but return respective 
 error)! When encountered, such error simply means that there are no more incoming 
 connections waiting to be accepted at this point, so the loop is broken, and next 
@@ -109,8 +109,8 @@ $
 
 ### Registering connections for events
 
-Speaking of next events. In order for next events to occur, they must be registered 
-with `Poll` first. Under the hood, `Poll` keeps track which token corresponds to
+Speaking of next events. In order for next events to occur, the token-socket pair must be registered 
+with the `Poll` first. Under the hood, `Poll` keeps track which token corresponds to
 which socket, but client code only gets access to token. This means if the server 
 intends to actually communicate with the client (and I'm pretty sure most servers 
 do), then token-socket pair must be stored somehow. In this example, I'm using 
@@ -119,7 +119,7 @@ to use here.
 
 Token is just a wrapper over `usize`, so simple counter is enough to provide 
 increasing sequence of tokens. Once socket is registered with respective token, 
-it is inserted into the hash-map.
+it is inserted into the HashMap.
 
 ```rust
 let mut counter: usize = 0;
@@ -158,8 +158,7 @@ match event.token() {
 ### Reading data from client
 
 When readable event occurs for given token, this means data is ready to be read 
-from respective socket. I will use just array of bytes as a buffer for reading the
-data from the socket. 
+from respective socket. I will use just array of bytes as a buffer for reading the data. 
 
 Read is performed in the loop until known `WouldBlock` error is returned. Each 
 call to read returns (if successful) actual number of bytes read, and when there
@@ -205,17 +204,32 @@ poll.register(&socket, token
 
 Writing data to the client socket is similar, and is done via buffer as well, but 
 no explicit loop is required, as there is already a [method][write_all-doc] that 
-is doing the loop: `.write_all()`.
+is doing the loop: `write_all()`.
+
+If I want all my protocol to do is to return how many bytes were received, I will 
+need an actual number of bytes written (`HashMap` will do), count bytes when 
+readable event occurs, then schedule a one-shot writable event, and when writable
+event occurs - send the response and drop the connection.
 
 ```rust
+let mut response: HashMap<Token, usize> = HashMap::new();
 ...
-token if event.readiness().is_writable() => {
-    let socket = sockets.get_mut(&token).unwrap();
-    // Now write `len` bytes from buffer to the socket
-    socket.write_all(&buffer[0..len]).unwrap();
-    // Now what?
+token if event.readiness().is_readable() => {
+    let mut bytes_read: usize = 0;
+    loop {
+        ... // sum up number of bytes received
+    }
+    response.insert(token, bytes_read);
+    // re-register for one-shot writable event
 }
 ...
+token if event.readiness().is_writable() => {
+    let n_bytes = response[&token];
+    let message = format!("Received {} bytes\n", n_bytes);
+    sockets.get_mut(&token).unwrap().write_all(message.as_bytes()).unwrap();
+    response.remove(&token);
+    sockets.remove(&token); // Drop the connection
+},
 ```
 
 ### What happens between reading and writing data?
@@ -247,37 +261,11 @@ Here I won't bother with actually implementing HTTP, what I'm going to do instea
 is to make my server behave as if it really understands GET requests, but will 
 always respond to such request with a response containing 6 bytes: `b"hello\n"`.
 
-If I want all my protocol to do is to return how many bytes were received, I will 
-need an actual number of bytes written (`HashMap` will do), count bytes when 
-readable event occurs, then schedule a one-shot writable event, and when writable
-event occurs - send the response and drop the connection.
-
-```rust
-let mut response: HashMap<Token, usize> = HashMap::new();
-...
-token if event.readiness().is_readable() => {
-    let mut bytes_read: usize = 0;
-    loop {
-        ... // sum up number of bytes received
-    }
-    response.insert(token, bytes_read);
-    // re-register for oneshot writable event
-}
-...
-token if event.readiness().is_writable() => {
-    let n_bytes = response[&token];
-    let message = format!("Received {} bytes\n", n_bytes);
-    sockets.get_mut(&token).unwrap().write_all(message.as_bytes()).unwrap();
-    response.remove(&token);
-    sockets.remove(&token); // Drop the connection
-},
-```
-
 ### Mocking HTTP
 
 For the sake of this article, mocking of HTTP is more than enough. I will use the 
 fact that HTTP request header is separated from request body (if any) with 4 bytes, 
-`\r\n\r\n`. So if I keep track of what current client have sent, and if at any point 
+`b"\r\n\r\n"`. So if I keep track of what current client have sent, and if at any point 
 there are target 4 bytes in there, I can respond with pre-defined HTTP response:
 
 ```
@@ -337,13 +325,13 @@ $ curl localhost:8080
 hello
 ```
 
-So the fun can start - let's try an see how performant this *single-threaded* 
-server is with common tools: `ab` and `wrk`. Note: 
+So the fun can start - let's try an see how this *single-threaded* 
+server is performing. I will use common tools: `ab` and `wrk`. Note: 
 * `ab` requires `-k` option to use `keep-alive` and reuse existing connections
-* `wrk2` is actually used as `wrk`, thus `--rate` parameter is present
+* `wrk2` is actually used as `wrk`, thus `--rate` parameter is required
 * `ab`/`wrk` is running on different VM than the server (but in the same region)
 
-Here are the numbers I got when trying benchmarking on the instance 
+Here are the numbers I got when trying benchmarking the server on the instance 
 `n1-standard-8 (8 vCPUs, 30 GB memory)` of some cloud provider 
 (that I'm not really allowed to mention here).
 
@@ -363,10 +351,9 @@ Transfer/sec: 10.12MB
 
 105k and 120k rps, not bad for a single thread.
 
-Of course, it is cheating, and one thing that's benchmarked is actually throughput
-between user and kernel space, since no single byte actually hits the network. But 
-still, this can be a (more or less) meaningful bottom line for how fast networking
-can be done using only one thread.
+Of course this can be qualified by cheating, but as long as real network is involved 
+(even inside the same zone), this is a real server under load, which can be 
+(more or less) meaningful bottom line for how fast networking can be done using single thread.
 
 The full and runnable code is available on [github][the-code], organized by one
 logical chapter per pull-request:
