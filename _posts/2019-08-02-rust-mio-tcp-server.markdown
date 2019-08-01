@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Low-level TCP server in Rust with MIO"
-date:   2019-07-28 17:22:42 +0200
+date:   2019-08-02 00:25:42 +0200
 categories: rust mio
 ---
 It is time to get acquainted with [Metal IO][mio-github], low-level cross-platform 
