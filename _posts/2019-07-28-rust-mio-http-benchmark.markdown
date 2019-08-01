@@ -338,26 +338,30 @@ hello
 ```
 
 So the fun can start - let's try an see how performant this *single-threaded* 
-server is with common tools: `ab` and `wrk`. Note: `ab` requires `-k` option to
-use `keep-alive` and reuse existing connections.
+server is with common tools: `ab` and `wrk`. Note: 
+* `ab` requires `-k` option to use `keep-alive` and reuse existing connections
+* `wrk2` is actually used as `wrk`, thus `--rate` parameter is present
+* `ab`/`wrk` is running on different VM than the server (but in the same region)
 
 Here are the numbers I got when trying benchmarking on the instance 
-`TODO` of some cloud provider 
+`n1-standard-8 (8 vCPUs, 30 GB memory)` of some cloud provider 
 (that I'm not really allowed to mention here).
 
 ```
-$ ab -n 1000000 -c 128 -k http://127.0.0.1:8080/
+$ ab -n 1000000 -c 128 -k http://instance-1:8080/
 <snip>
-TODO
+Requests per second:    105838.76 [#/sec] (mean)
+Transfer rate:          9095.52 [Kbytes/sec] received
 ```
 
 ```
-$ $ wrk -d 30s -t 4 -c 128 http://127.0.0.1:8080/
+$ wrk -d 60s -t 8 -c 128 --rate 150k http://instance-1:8080/
 <snip>
-TODO
+Requests/sec: 120596.75
+Transfer/sec: 10.12MB
 ```
 
-Not bad for a single thread!
+105k and 120k rps, not bad for a single thread.
 
 Of course, it is cheating, and one thing that's benchmarked is actually throughput
 between user and kernel space, since no single byte actually hits the network. But 
@@ -374,7 +378,7 @@ logical chapter per pull-request:
 
 ### Where to go from here
 
-Scaling to multiple threads: read [this](https://blog.cloudflare.com/the-sad-state-of-linux-socket-balancing/).
+Scaling to multiple threads: start [here](https://blog.cloudflare.com/the-sad-state-of-linux-socket-balancing/).
 
 [the-code]: https://github.com/sergey-melnychuk/mio-tcp-server
 [mio-github]: https://github.com/tokio-rs/mio
