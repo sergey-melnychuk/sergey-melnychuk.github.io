@@ -155,7 +155,7 @@ data from the socket.
 
 Read is performed in the loop until known `WouldBlock` error is returned. Each 
 call to read returns (if successful) actual number of bytes read, and when there
-are zero bytes read - this means client has disconnected already, and there is no
+are zero bytes read - this [means][read-doc] client has disconnected already, and there is no
 point if keeping the socket around (nor continuing the reading loop).
 
 ```rust
@@ -185,9 +185,19 @@ token if event.readiness().is_readable() => {
 
 ### Writing data to the client
 
+For a token to receive writable event, it must be registered in `Poll` first. The 
+`oneshot` option might be useful for scheduling writable events, this option makes 
+sure that event of interest is fired only once.
+
+```rust
+poll.register(&socket, token
+    Ready::writable(),
+    PollOpt::edge() | PollOpt::oneshot()).unwrap();
+```
+
 Writing data to the client socket is similar, and is done via buffer as well, but 
-no explicit loop is required, as there is already a method that is doing the 
-loop: `.write_all()`.
+no explicit loop is required, as there is already a [method][write_all-doc] that 
+is doing the loop: `.write_all()`.
 
 ```rust
 ...
@@ -202,17 +212,36 @@ token if event.readiness().is_writable() => {
 
 ### What happens between reading and writing data?
 
-OK, at this point I have reading the data from the socket, and (possible) writing
+At this point I have reading the data from the socket, and (possible) writing
 of the data to the socket. Yet writing never happens, as no token gets registered
 for writable events!
 
-OK, when should I register a token for writable event? Well, when it has something
+When should I register a token for a writable event? Well, when it has something
 to write! Sounds simple, isn't it? In practice this means it's time to actually 
 implement some *protocol*.
 
-### OK, how do I implement a protocol?
+### How do I implement a protocol?
 
-TBD
+OK, I just want to send text or JSON back, and TCP is a [protocol][protocol-doc], 
+why do I need more? Well, [TCP][tcp-doc] *is* a protocol, the Transmission Control 
+Protocol, the transport-level one. TCP cares about receiver to receive exact
+amount of bytes in exact order that sender sent! So at the transport level, I have
+to deal with two streams of bytes: one going from client to the server, and another
+one going straight back.
+
+What's useful when dealing with servers, is an application level protocol (say, HTTP).
+The application level protocol can define such entities as `request`, that server 
+receives from the client, and `response`, that client receives back from the server.
+
+It is important to mention, that implementing HTTP *correctly* is not as easy as 
+it sounds, and even more, it is already done for you, e.g. in [hyper][hyper-github]. 
+Here I won't bother with actually implementing HTTP, what I'm going to do instead 
+is to make my server behave as if it really understands GET requests, but will 
+always respond to such request with a response containing 6 bytes: `b"hello\n"`.
+
+### What I am about to GET
+
+TODO
 
 [the-code]: TODO
 [mio-github]: https://github.com/tokio-rs/mio
@@ -221,5 +250,8 @@ TBD
 [accept-docs]: https://docs.rs/mio/0.5.1/mio/tcp/struct.TcpListener.html#method.accept
 [wouldblock]: https://doc.rust-lang.org/nightly/std/io/enum.ErrorKind.html#variant.WouldBlock
 [slab-crate]: https://docs.rs/slab/0.4.2/slab/
-
-
+[read-doc]: https://doc.rust-lang.org/nightly/std/io/trait.Read.html#tymethod.read
+[write_all-doc]: https://doc.rust-lang.org/std/io/trait.Write.html#method.write_all
+[tcp-doc]: https://ru.wikipedia.org/wiki/Transmission_Control_Protocol
+[protocol-doc]: https://en.wikipedia.org/wiki/Communication_protocol
+[hyper-github]: https://github.com/hyperium/hyper
