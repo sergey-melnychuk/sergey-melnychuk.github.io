@@ -4,7 +4,7 @@ title:  "Monadic parser combinators in Rust"
 date:   2019-08-31 18:24:42 +0200
 categories: parser combinators monad rust
 ---
-Why don't I implement a nice monadic parser combinator library in Rust? That's what my thought was when after implementing low-level mock-HTTP server in [MIO][mio] and actually need to parse the bytes received by server.
+Why don't I implement a nice monadic parser combinator library in Rust? That's what my thought was when after implementing low-level mock-HTTP server in [MIO][mio] and actually needed to parse the bytes received by server.
 
 What I wanted is a declative way to define sequence of strings to be matched and/or extracted. Example of a parser for a string representing key-value pair (`<string>: <string>`) would look like this:
 
@@ -28,13 +28,53 @@ let kv: KV = p.parse(stream).unwrap();
 
 The re-invented stream abstraction is useful when it is required to pull bytes or chunks of bytes from a buffer, with a possibility to reset the position some bytes are read (this allows re-trying matching if needed).
 
-The implementation has a few key points. First one is `Matcher` type - just a function that can be applied to a `ByteStream`. `ByteStream` itself is just a wrapper over `Vec<u8>`, nothing fancy.
+The implementation has a few key points. The `Matcher` type - just a function that can be applied to a `ByteStream`. `ByteStream` itself is just a wrapper over `Vec<u8>`, nothing fancy.
 
 ```rust
 pub type Matcher<T> = dyn Fn(&mut ByteStream) -> Result<T, MatchError> + 'static;
 ```
 
-To chain two matchers into a new matcher, that represents sequential match on first one the on second one, there is a `chain` operator:
+The `single` matcher that matches a single character from input `ByteStream` looks like this:
+
+```rust
+pub fn single(chr: char) -> Box<Matcher<char>> {
+    Box::new(move |bs| {
+        let pos = bs.pos();
+        bs.next()
+            .map(|b| b as char)
+            .filter(|c| *c == chr)
+            .ok_or(MatchError::unexpected(
+                pos,
+                format!("EOF"),
+                format!("{}", chr),
+            ))
+    })
+}
+```
+
+The `repeat` matcher is a more generic one, that allows matching zero or more occurrences of an input matcher:
+
+```rust
+pub fn repeat<T: 'static>(this: Box<Matcher<T>>) -> Box<Matcher<Vec<T>>> {
+    Box::new(move |bs| {
+        let mut acc: Vec<T> = vec![];
+        loop {
+            let mark = bs.mark();
+            match (*this)(bs) {
+                Err(_) => {
+                    bs.reset(mark);
+                    return Ok(acc);
+                }
+                Ok(t) => acc.push(t),
+            }
+        }
+    })
+}
+```
+
+There are more useful matchers: `one`, `maybe`, `until`, `before`, `token`, `string`, `space` and `bytes`. I believe it is possible to infer underlying functionality from the name of a matcher.
+
+To chain two matchers into a new matcher, that represents sequential match made by the first one and then by the second one, there is a `chain` operator:
 
 ```rust
 // Given Matcher<T> and Matcher<U>, make a Matcher<(T, U)>.
@@ -114,7 +154,6 @@ pub fn expose<T: 'static, U: 'static, F: Fn(&T) -> Box<Matcher<U>> + 'static>(
 ```
 
 ```rust
-// 
 impl<T: 'static> Parser<T> {
 ...
 fn then_with<U: 'static, F: Fn(&T) -> Box<Matcher<U>> + 'static>(self, f: F) -> Parser<(T, U)> {
@@ -189,7 +228,7 @@ fn request_parser() -> Parser<Request> {
                 .unwrap_or_default();
             bytes(len)
         })
-        .save(|req, body| req.body = body)
+        .save(|req, content| req.content = content)
 }
 
 // Checking if it actually works
@@ -236,9 +275,9 @@ User-Agent: Mozilla/4.0 (compatible; MSIE 6.0; Windows NT 5.1)
 
 This is easy way to build clean, simple and composable parser combinators, glue them into monad, and define naive HTTP request parser, in pure Rust, without any dependencies. And this naive request parser event seems to work! At least test passes.
 
-Current implementation is "stateless" in a way that if entity is not fully matched (e.g. not all chunks of a request were received), it returns error and next attempts will need to start over. For this reason, the client code should care about keeping the current read position in a stream and resetting the byte-stream to that position if matching did not succeed.
+Current implementation is "stateless" in a way that if entity is not fully matched (e.g. not all chunks of a request were received), it returns error and next attempts will need to start over. For this reason, the client code should care about keeping the current read position in a stream and resetting the stream to that position if matching did not succeed.
 
-The "stateful" parser could keep the aggregate and repeat matching from last position in a stream. I believe it would require to plug State monad somewhere, and allow returning something like `(State, Either<Error, Parser<T>>)` from parser.
+The "stateful" parser could keep the aggregate and repeat matching from last position in a stream. I believe it would require to plug in the State monad somewhere, and allow returning something like `(State, Either<Error, Parser<T>>)` from parser.
 
 The final code with implemented parsers for HTTP request and WebSocket frame are available on [github][code].
 
