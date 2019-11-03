@@ -15,7 +15,7 @@ struct KV {
     v: String,
 }
 
-let p: Parser<KV> = Parser::init(Entity::default())
+let p: Parser<KV> = Parser::init(KV::default())
     .then(until(':'))
     .save(|target, key| target.k = key)
     .then(exact(": "))
