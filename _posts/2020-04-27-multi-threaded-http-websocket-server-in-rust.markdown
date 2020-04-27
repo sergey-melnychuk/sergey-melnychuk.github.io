@@ -4,9 +4,9 @@ title:  "Multi-threaded HTTP/WebSocket server in Rust"
 date:   2020-04-27 21:15:42 +0200
 categories: rust mio concurrency multi-threading tcp websocket
 ---
-Building up on my previous posts about MIO-based [server][post-server] and 
-[parser combinators][post-parsers], this post is about making a simple TCP 
-server run on multiple threads and implement WebSocket protocol.
+Building up on my previous posts about [MIO-based server][post-server] and 
+[parser combinators][post-parsers], this post is about making a very simple HTTP 
+server capable of running on multiple threads and implementing WebSocket protocol.
 
 TL;DR: [code].
 
@@ -17,7 +17,7 @@ when distributing socket reading/writing over 8 threads. **Important note**: thi
 benchmark is not representative on its own, just the comparison of two allows to 
 notice 2.5x speedup. [Amdahl's Law](https://en.wikipedia.org/wiki/Amdahl%27s_law) 
 in action: the main thread is still responsible for listening for incoming 
-connections and (de)registering socket events.
+connections and registering socket events.
 
 #### Single-threaded
 
@@ -57,7 +57,7 @@ is useful for stateless parsing (receive stream) and buffered sending (send stre
 
 Handle wraps a socket provided from listener as a connection, and has `pull()` to read from
 socket into receive stream, `push()` to write data from send stream to the socket, and `put()`
-allows accepting data for buffering into send stream.
+to store data for buffering into the send stream.
 
 ```rust
 struct Handler {
@@ -194,7 +194,7 @@ So I have already been [doing-some-actors](https://github.com/sergey-melnychuk/d
 would be to build... a chat application! This is what is coming next, most likely.
 1. Actor from the Actor Model seems to be way too low-level for direct usage in applications. 
    - Somehow many people don't feel wrong writing `class User extend Actor` (thus coupling domain-model entity with 
-specific implementation) - for me it seems the same as writing `class User extends Mutex`...
+specific Actor Model implementation) - for me it seems the same as writing `class User extends Mutex`...
    - Thus nice and clean (and preferably type-safe) API on top of that might be useful!
 
 [post-server]: https://sergey-melnychuk.github.io/2019/08/01/rust-mio-tcp-server/
