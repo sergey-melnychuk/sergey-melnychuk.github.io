@@ -72,7 +72,8 @@ struct Handler {
 #### Worker Thread
 
 Worker Thread receives events (handlers) from the main thread and runs the "payload".
-Then returns handler (most likely in updated state) back to the main thread.
+Then returns handler (most likely in updated state) back to the main thread. All IO events 
+on connected socket are actually happening on worker threads.
 
 ```rust
 loop {
@@ -101,14 +102,14 @@ if let Some(req) = parse_http_request(&mut handler.recv_stream) {
 
 #### Listener Thread
 
-The Main Thread owns server socket that receives connections and owns `Poll` that
+The Main Thread owns server socket that receives connections and also `Poll` instance, that
 allows getting and processing socket events. Once read/write event for specific handler was
 received, it is time to send the handler to worker thread for processing.
 
-Meanwhile, handlers that are returning from workher threads need re-registering for next
-socket events. Thus logical second duty of a Listener Thread is to re-register handlers for 
+Meanwhile, handlers that are returning from worker threads need re-registering for next
+socket events. So next thing to do for a Listener Thread is to re-register handlers for 
 respective socket events: if a handler has non-empty send stream, it needs to receive writable
-event - if not the assumption is that it is ready to read some more data.
+event; and if not the assumption is that it is ready to read some more data.
 
 ```rust
 loop {
@@ -165,8 +166,8 @@ loop {
 
 #### HTTP to WebSocket
 
-WebSocket Upgrade request is just a regular HTTP request, but it needs some special handling: like
-calculating 'Sec-Websocket-Accept' response header based on 'Sec-Websocket-Key' request header.
+WebSocket Upgrade request is just a regular HTTP request, but it needs some special processing, like
+calculating 'Sec-Websocket-Accept' response header based on 'Sec-Websocket-Key' request header below:
 
 ```rust
 fn res_sec_websocket_accept(req_sec_websocket_key: &String) -> String {
@@ -177,25 +178,26 @@ fn res_sec_websocket_accept(req_sec_websocket_key: &String) -> String {
 ```
 
 For more details on WebSocket: see nice guide on [MDN](https://developer.mozilla.org/en-US/docs/Web/API/WebSockets_API/Writing_WebSocket_servers)
-and rust-parser-combinators [code](https://github.com/sergey-melnychuk/rust-parser-combinators/blob/master/src/ws.rs). I must admin
-parsing binary WebSocket frames is as straightforward as parsing text-based HTTP requests.
+and [rust-parser-combinators](https://github.com/sergey-melnychuk/rust-parser-combinators/blob/master/src/ws.rs). I must admit
+parsing binary WebSocket frames is as straightforward as parsing text-based HTTP requests, so parser-combinators seem to do well.
 
 #### It Works!
 
-Finally, putting all pieces together allows to connect to the server from a browser:
+Finally, putting all pieces together allows connecting to the server from a browser:
 
 ![WebSocket connection in Browser]({{ site.url }}/assets/2020-04-27-multi-threaded-http-websocket-server-in-rust/websocket.png)
 
 #### Plans
 
-1. The more I'm moving towards fundamental constructs, them more it seems like Actor Model. 
+1. The more I'm moving towards fundamental constructs like sockets and threads, the more code around it seems like Actor Model. 
 So I have already been [doing-some-actors](https://github.com/sergey-melnychuk/doing-some-actors) for some time.
 1. With clean and simple Actor Model implementation and HTTP/WebSocket protocol parser, the classic demo
 would be to build... a chat application! This is what is coming next, most likely.
-1. Actor from the Actor Model seems to be way too low-level for direct usage in applications. 
+1. Actor from the Actor Model seems to be way too low-level for direct usage in application-level code. 
    - Somehow many people don't feel wrong writing `class User extend Actor` (thus coupling domain-model entity with 
-specific Actor Model implementation) - for me it seems the same as writing `class User extends Mutex`...
-   - Thus nice and clean (and preferably type-safe) API on top of that might be useful!
+specific Actor Model implementation) - for me it seems the same as writing `class User extends Mutex`. Just my opinion.
+   - Thus nice and clean (and preferably type-safe) API on top of that might be extremely useful! 
+Something similar to [Akka Streams](https://doc.akka.io/docs/akka/current/stream/stream-quickstart.html) maybe.
 
 [post-server]: https://sergey-melnychuk.github.io/2019/08/01/rust-mio-tcp-server/
 [post-parsers]: https://sergey-melnychuk.github.io/2019/08/31/rust-parser-combinators/
