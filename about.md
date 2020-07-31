@@ -6,5 +6,4 @@ permalink: /about/
 
 Building software since 1999.
 
-Getting paid by building software since 2010.
-
+Building software for living since 2010.
