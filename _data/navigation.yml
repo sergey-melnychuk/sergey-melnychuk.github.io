@@ -5,3 +5,5 @@ main:
     url: /about/
   - title: "GitHub"
     url: https://github.com/sergey-melnychuk
+  - title: "CV"
+    url: /assets/cv.pdf
