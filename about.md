@@ -49,5 +49,7 @@ Code:
   - [Pull Request](https://github.com/rust-lang/rust/pull/72206)
 
 - Advent of Code (fully solved ones)
+  - [2022](https://github.com/sergey-melnychuk/advent-of-code-2022)
   - [2021](https://github.com/sergey-melnychuk/advent-of-code-2021)
   - [2020](https://github.com/sergey-melnychuk/advent-of-code-2020)
+
