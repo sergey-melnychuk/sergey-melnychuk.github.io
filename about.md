@@ -6,7 +6,7 @@ permalink: /about/
 
 Experienced software engineer passionate about functional programming, large-scale distributed systems and machine learning. Constantly pursuing self-improvement both personal and professional. With total 13+ (getting paid for programming since 2010) years in the industry, I am proficient mostly in Rust (5+ years of day-to-day experience), Java (10+ years) and Scala (7+ years) but also have meaningful experience (<1 year) also in Go, C++, C, Python and JavaScript.
 
-My strong background in Computer Science and knowledge advanced data structures & algorithms (and also Master's Degree in Computer Science since 2012), concurrent/parallel programming, distributed systems and algorithms, as well as TRIZ and Design Thinking approach allows designing and building clean, readable, testable, scalable software solutions for sophisticated problems. I don't stick to single language/tool/stack and keep generalist approach to pick a right tool for a job, taking into account requirements and trade-offs.
+Strong background in Computer Science and knowledge advanced data structures & algorithms (with Master's Degree in Computer Science since 2012), concurrent/parallel programming, distributed systems and algorithms, as well as TRIZ and Design Thinking approach allows designing and building clean, readable, testable, scalable software solutions for sophisticated problems. I don't stick to single language/tool/stack and keep generalist approach to pick a right tool for a job, taking into account requirements and trade-offs.
 
 Professional experience with **Rust**:
 
