@@ -5,6 +5,8 @@ main:
     url: /
   - title: "About"
     url: /about/
+  - title: "STARs"
+    url: /stars/
   - title: "GitHub"
     url: https://github.com/sergey-melnychuk
   - title: "CV"
