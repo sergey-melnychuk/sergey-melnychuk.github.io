@@ -1,7 +1,7 @@
 ---
 layout: post
 title:  "Cloudflare Workers setup and usage"
-date:   2023-05-12 15:11:42 +0200
+date:   2023-05-19 15:11:42 +0200
 categories: cloudflare workers wasm rust
 ---
 
@@ -9,9 +9,7 @@ TL;DR: See [sergey-melnychuk/project-one](https://github.com/sergey-melnychuk/pr
 
 At the time of writing this post [Cloudflare Workers](https://developers.cloudflare.com/workers/) says:
 
-> Deploy serverless code instantly across the
-> globe to give it exceptional performance, 
-> reliability, and scale."
+> Deploy serverless code instantly across the globe to give it exceptional performance, reliability, and scale.
 
 Basically looks like an AWS Lambda but with benfits of WASM runtime (scalability, performance, no "cold starts", no network overhead).
 
