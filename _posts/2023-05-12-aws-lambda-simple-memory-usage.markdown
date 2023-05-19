@@ -1,6 +1,6 @@
 ---
 layout: post
-title:  "Simple memory usage stats for AWS Lambda"
+title:  "AWS Lambda memory usage"
 date:   2023-05-12 15:12:42 +0200
 categories: aws lambda memory profiling rust
 ---
