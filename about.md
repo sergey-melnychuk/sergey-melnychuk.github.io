@@ -22,13 +22,13 @@ Professional experience with **Rust**:
     - provides API similart to [std::collections::BTreeMap](https://doc.rust-lang.org/std/collections/struct.BTreeMap.html)
   - [Pull Request](https://github.com/near/near-sdk-rs/pull/154)
 
+- AdTech startup (Freelance, <1 year):
+  - implementation of data enrichment pipeline for OpenRTB bid requests
+  - implementation of RTB SSP components based on Cloudflare Workers
+
 - IoT startup (Freelance, ~1 year): 
   - design and implementation of a low-level binary protocol for secure communications between IoT devices in Rust
   - implementation of a protocol client for ESP32 hardware in pure C
-
-- AdTech startup (Freelance, <1 year>):
-  - implementation of data enrichment pipeline for OpenRTB bid requests
-  - implementation of RTB SSP components based on Cloudflare Workers
 
 Things I did in **Rust**:
 
