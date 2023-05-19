@@ -1,7 +1,7 @@
 ---
 layout: post
-title:  "What Actor Model is about?"
-date:   2022-09-15 16:11:42 +0200
+title:  "What Actor Model is really about?"
+date:   2023-05-26 22:07:42 +0200
 categories: actors akka actor-model uppercut
 ---
 
@@ -15,4 +15,4 @@ TODO:
 - actor type-safety
 - data-flow vs. control-flow (sending messages vs. calling functions)
 - event-driven vs. state-driven architectures
-- introduction to the Uppercut
+- introduction to the [Uppercut](https://github.com/sergey-melnychuk/uppercut/)
