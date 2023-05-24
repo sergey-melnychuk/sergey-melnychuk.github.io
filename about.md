@@ -4,26 +4,28 @@ title: "About"
 permalink: /about/
 ---
 
-Experienced software engineer passionate about functional programming, large-scale distributed systems and machine learning. Constantly pursuing self-improvement both personal and professional. With total 13+ (getting paid for programming since 2010) years in the industry, I am proficient mostly in Rust (5+ years of day-to-day experience), Java (10+ years) and Scala (7+ years) but also have meaningful experience (~1 year) also in Go, C++, C, Python and JavaScript.
+Experienced software engineer passionate about functional programming, large-scale distributed systems and machine learning. Constantly pursuing self-improvement both personal and professional. With total of 13+ (getting paid for programming since 2010) years in the industry, I am proficient mostly in Rust (5+ years of day-to-day experience), Java (10+ years) and Scala (6+ years) but also have meaningful experience (~1 year) in Go, C++, C, Python and JavaScript.
 
-Strong background in Computer Science and knowledge advanced data structures & algorithms (with Master's Degree in Computer Science since 2012), concurrent/parallel programming, distributed systems and algorithms, as well as TRIZ and Design Thinking approach allows designing and building clean, readable, testable, scalable software solutions for sophisticated problems. I don't stick to single language/tool/stack and keep generalist approach to pick a right tool for a job, taking into account requirements and trade-offs.
+Strong background in Computer Science and knowledge of advanced data structures & algorithms (with Master's Degree in Computer Science since 2012), concurrent & parallel programming, distributed systems and algorithms, as well as TRIZ and Design Thinking allows designing and building clean, readable, testable, scalable software solutions for sophisticated problems. I don't stick to single language/tool/stack and keep a generalist approach that allows picking the right tool for a job, taking into account requirements and trade-offs.
 
 Professional experience with **Rust**:
 
 - [Eiger](https://www.eiger.co) (1+ year):
   - development maintenance and of [Starknet](https://www.starknet.io/en) full node: [Pathfinder](https://github.com/eqlabs/pathfinder)
   - JSON-RPC code generation tool: [iamgroot](https://github.com/sergey-melnychuk/iamgroot)
-  - Sandbox version of a new generation Starknet full node: [armada](https://github.com/sergey-melnychuk/armada)
+  - PoC version of a next-gen Starknet full node: [armada](https://github.com/sergey-melnychuk/armada)
 
 - NEAR (via [GitCoin](https://www.gitcoin.co/))
   - AVL-tree implementation for [Near Rust SDK](https://docs.near.org/sdk/rust/introduction)
+    - [Pull Request](https://github.com/near/near-sdk-rs/pull/154)
     - self-balancing binary tree to store key-value data
     - optimized for limited blockchain-specific runtime
-    - provides API similart to [std::collections::BTreeMap](https://doc.rust-lang.org/std/collections/struct.BTreeMap.html)
-  - [Pull Request](https://github.com/near/near-sdk-rs/pull/154)
+    - provides API similart to `std::collections::BTreeMap`
+  - Heap-based Priority Queue (not merged though)
+    - [Pull Request](https://github.com/near/near-sdk-rs/pull/170)
 
 - AdTech startup (Freelance, <1 year):
-  - implementation of data enrichment pipeline for OpenRTB bid requests
+  - implementation of data enrichment pipeline for OpenRTB bidder
   - implementation of RTB SSP components based on Cloudflare Workers
 
 - IoT startup (Freelance, ~1 year): 
@@ -81,7 +83,7 @@ Things I did in **Rust**:
 
 #### Equinix, circa 2021
 
-**Situation:** The project ("Job Launcher" - part of custom home-grown tech stack, whic is responsible for organizing and submitting Spark jobs to on-demand Amazon EMR clusters) passed over from previous team has signifant techincal and organizational problems.
+**Situation:** The project (part of custom home-grown tech stack, whic is responsible for organizing and submitting Spark jobs to on-demand Amazon EMR clusters) passed over from previous team has signifant techincal and organizational problems.
 
 **Task:** Take over project and keep up with SLA (Service Level Agreement) and SLC (Service Level Commitment). Resolve (a lot of) technical issues and mis-behaviours of the existing solution.
 
