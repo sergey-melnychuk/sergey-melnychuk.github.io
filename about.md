@@ -13,7 +13,15 @@ Professional experience with **Rust**:
 - [Eiger](https://www.eiger.co) (1+ year):
   - development maintenance and of [Starknet](https://www.starknet.io/en) full node: [Pathfinder](https://github.com/eqlabs/pathfinder)
   - JSON-RPC code generation tool: [iamgroot](https://github.com/sergey-melnychuk/iamgroot)
-  - PoC version of a next-gen Starknet full node: [armada](https://github.com/sergey-melnychuk/armada)
+  - PoC of a next-gen Starknet full node: [Armada](https://github.com/sergey-melnychuk/armada)
+    - suggests a clean solid architecture for Pathfinder to re-use
+    - improved sync algorithms handles network reorgs automatically
+    - uses filesystem and "lean" [yakvdb](https://github.com/sergey-melnychuk/yakvdb)-indices for scalable and efficient storage
+    - [for now] does not actually use Starknet SDK
+      - no block hash validation
+      - no function calls
+      - no tx fee estimation
+      - no tx simulation
 
 - NEAR (via [GitCoin](https://www.gitcoin.co/))
   - AVL-tree implementation for [Near Rust SDK](https://docs.near.org/sdk/rust/introduction)
