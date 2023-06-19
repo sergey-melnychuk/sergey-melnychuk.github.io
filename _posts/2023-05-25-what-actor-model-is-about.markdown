@@ -9,7 +9,7 @@ TL/DR: read [1] and watch [2]:
 1. [Actor Model of Computation](https://arxiv.org/pdf/1008.1459)
 1. [The Actor Model (Hewitt, Meijer, Szyperski)](https://www.youtube.com/watch?v=7erJ1DV_Tlo)
 
-During recent years "Actor Model [of computation]" (or simple "Actors") turned into a buzzword. But as usually happens with buzzwords, more "buzz" leads to less understanding of what it is actually about. There are dosen of implementations of the Actor Model in a variety of languages, most of them usually even make sense and ome of them are just masterpieces (Erlang VM, Akka). Heck, I even implemented one: [Uppercut](https://github.com/sergey-melnychuk/uppercut/)!
+During recent years "Actor Model [of computation]" (or simple "Actors") turned into a buzzword. But as usually happens with buzzwords, more "buzz" leads to less understanding of what it is actually about. There are dosen of implementations of the Actor Model in a variety of languages, most of them usually even make sense and some of them are just masterpieces (Erlang VM, Akka). Heck, I even implemented one: [Uppercut](https://github.com/sergey-melnychuk/uppercut/)!
 
 In this post I will try to structure my understanding and findings about Actor Model as well as best (and worst) use-cases for it. To start with, I just must warn that "everything is an actor" is just freaking wrong! I strongly encourage you to read the [paper](https://arxiv.org/pdf/1008.1459) and vatch the [video](https://www.youtube.com/watch?v=7erJ1DV_Tlo) if you want to achieve deep understanding of the topic once and for all.
 
@@ -34,7 +34,7 @@ if x == 1 {     ## X+00: jne [X+ M]
 }
 ```
 
-Same logical result in Actor Model can be achieved using adjusting data-flow:
+Same logical result in Actor Model can be achieved by adjusting data-flow:
 
 ```
 handle(X):                  ## Actor message handler
@@ -57,7 +57,7 @@ From a concurrency standpoint, Actor is a synchronization primitive (Actor insta
 
 If a business logic of a solution is better described in term of (relatively) small changes (events), then it is likely that it is going to benefit from applying an [Event-drived architecture](https://en.wikipedia.org/wiki/Event-driven_architecture). But if it is a regular RPC (REST/SOAP/etc), with relatively large traffic between peers (say up to couple of megabytes JSON sent from a server as a response to a client), then using Actor Model is going to be useless at best and maybe even harmful at worst.
 
-I've seen a lot of troubles where Actor Model was misused, but probably the most harmful one is to block the thread while processing a message in a context of an Actor. All the Actors in the Actor System are likely being run on some kind of thread pool, thus blocking Actor thread pretty much partially blocks the capacity of the whole Actor System to make progress. Reasong for such misuse is likely a lack of understanding how specific actor framework works under the hood, as well as lack of knowledge how to operate with async primitives (e.g. `Future`s in an actor context). You don't need actors to implement request-response pattern! Just use any web-framework FFS! Check out [Interaction Patterns](https://doc.akka.io/docs/akka/current/typed/interaction-patterns.html) for more details.
+I've seen a lot of troubles where Actor Model was misused, but probably the most harmful one is to block the thread while processing a message in a context of an Actor. All the Actors in the Actor System are likely being run on some kind of thread pool, thus blocking Actor thread pretty much partially blocks the capacity of the whole Actor System to make progress. Reason for such misuse is likely a lack of understanding how specific actor framework works under the hood, as well as lack of knowledge how to operate with async primitives (e.g. `Future`s in an actor context). You don't need actors to implement request-response pattern! Just use any web-framework FFS! Check out [Interaction Patterns](https://doc.akka.io/docs/akka/current/typed/interaction-patterns.html) for more details.
 
 Note on type safety. When dealing with Actor Model, a useful abstraction is so called "Location Transparency", meaning that the sender of the message does not know where the received would be (meaning the same host or another host, acessible over the network). So in order to send/receive messages over the network in a generic way, the only type available is `&[u8]` (or owned `Vec<u8>`). So the Actor Model is absolutely type-safe, if you know what I mean.
 
