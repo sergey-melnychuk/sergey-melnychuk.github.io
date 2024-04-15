@@ -1,0 +1,11 @@
+# If you want to link only specific pages in your header, add the path to the
+# pages in order as they should show up.
+main:
+  - title: "Home"
+    url: /
+  - title: "Archive"
+    url: /archive/
+  - title: "GitHub"
+    url: https://github.com/sergey-melnychuk
+  - title: "CV"
+    url: /cv.pdf
