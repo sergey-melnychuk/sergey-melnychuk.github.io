@@ -1,0 +1,99 @@
+---
+layout: post
+title:  "Beerus in 2024"
+date:   2024-12-30 14:53:42 +0000
+categories: rust crypto starknet beerus helios
+---
+The 2024 is almost over and it is time to look back and summarise the whole year of progress on [Beerus](https://github.com/eigerco/beerus).
+
+TL/DR: We did well. Beerus is now well-organized & well-tested, it can run in a browser through WebAssembly and execute function calls in a stateless way.
+
+*DISCLAIMER: Opinions are my own. This posts only purpose is to share my personal software engineering experience on the project and highlight significant effort made and amazing progress achieved. Nothing more, nothing less.*
+
+### Taking over
+
+The [announcement](https://www.eiger.co/blog/eiger-taking-over-ownership-for-beerus-working-on-starknet-light-clients) that Eiger is taking over Beerus was published on January 17th, and since then a lot of efforts were invested in making Beerus work on multiple levels. I will be frank: the team before us did a lot of work, but looking through the code, it didn't feel like there was a good sense of direction or unified strategy to pursue. The code was sometimes untidy, not structured very well, not tested very well, the "integration tests" were just `hurl` requests with trivial-to-none assertions. The whole project after thorough examination turned out to be effectively just a RPC proxy (with a supported RPC version being already outdated), with all added value being just coupling the call to `starknet_getStateAt` with the call to `pathfinder_getProof`, and the only relevant piece of code turned out to be the verification of a merkle proof. I am not trying to be harsh or criticize or attack anyone personally. I just want to point out that the project was in far-from-perfect state when we took over and also highlight the enormous amount of work done and amazing progress achieved.
+
+It started with cleaning things up, removing test suite for soon-to-be-deprecated Goerli testnet, later intoroducing support of Sepolia testnet (also to [Helios](https://github.com/a16z/helios/pull/326)) and basically figuring out what to do from there. It was finally the time when I had an urge to dive deep into the domain and the topic to figure things out, define strategic goals and direction for the project and step in into a a tech-lead role. Thankfully there were some articles about Helios and light clients available (["Building Helios"](https://a16zcrypto.com/posts/article/building-helios-ethereum-light-client/) and ["Don't trust, verify"](https://a16zcrypto.com/posts/article/an-introduction-to-light-clients/)) so I knew where to start.
+
+### Learning
+
+Learning [Helios](https://github.com/a16z/helios) and diving deeper into the topics of light clients, Ethereum consensus internals & beacon chain was an amazing experience, I did learn a lot. The team behind Helios clearly did a great job bulding and documenting it. From starting with "OK, I need to build something similar to this Helios-thingy but for Starknet, no big deal" the idea of a light client for Starknet was crystalizing in my mind, clarifying use-cases and necessary design decisions and trade offs. Spending more than a year on the [Pathfinder](https://github.com/eqlabs/pathfinder) team before switching to Beerus was also extremely useful - I did learn a lot about Starknet internals and challenges of serving RPC requests. During my time in Pathfinder, Starknet moved from Python-based runtime to a Rust-based `blockifier` (that later is going to be included in the `sequencer`), so serving methods like `starknet_call`, `starknet_estimateFee` and `starknet_simulateTransaction` changed and improved significantly.
+
+What now seems pretty obvious was actually an ["eureka moment"](https://en.wikipedia.org/wiki/Eureka_effect) for me. As long as I am limited only to a verifyable state (literally querying & verifying the merkle proof for the exact state cell's value retrieved), why don't I enable executing calls (and later even pre-executing transactions maybe) in a stateless manner (meaning the Beerus is going to be completely stateless, querying all the necessary state pieces from the chain)? This is how I "discovered" a concept that I later managed to successfully implement (not without its challenges of course) named "Stateless Execution". After explaining what I have in mind and making sure this is indeed the most reasonable stategic way to proceed with the project development, I did focus on making it happen. I had two milestones in mind that can actually be achieved simultaneously: first the "Stateless Execution" implementation based on `blockifier`/`sequencer` (as well as `cairo`, `cairo-vm` and `helios` as I found out later), and then second making sure it is compilable & buildable for the WebAssembly target, "WebAssembly Support".
+
+### Stateless Execution
+
+Using `blockfier` for a function call execution was rather easy step in the process, even though `StateReader` trait being non-async caused some workarounds to be necessary: calling naturally async IO-bound code from non-async trait methods is trickier than it sounds in an async project. So eventually the easy part of using `blockifier` was over, the hard part started: making sure that the whole project is now compilable into `wasm32-unknown-unknown` target. After investigating and trying out multiple ways to proceed, I eventually settled on injecting a blocking HTTP call (to make calls to the RPC API) and running Beerus WebAssembly in a WebWorker. I had to solve some minor issues and use patched dependencies to make them WebAssembly-friendly, also bring in a simple CORS proxy to make sure that RPC calls from the browser context are working properly, and eventually when all obstacles and troubles were solved and managed, [it worked](https://github.com/eigerco/beerus/pull/756#issuecomment-2371008221)! After that of course I did make it [look ~~nice~~ nicer](https://github.com/eigerco/beerus/pull/785) ~~and now it is deployed online~~.
+
+This was a huge step for the project and my personal huge win. I had no "safety net" to rely on, I was basically on my own bulding the thing no one ever built before. I had to ask weird questions online like "how do I do blocking IO on the main thread of the browser" (spoiler alert: you can't) and keep getting useless answers (mostly in a fashion of "you're just ~~holding~~ doing it wrong") from people who never solved similar problems and never had similar issues. I guess this is how asking non-trivial questions on the Internet works today - people who actually know their stuff and can answer are busy using those skills and knowledge building things, while people answering prefer explaining how to write a 'hello world' rather than helping to figure out really challenging & complex issues. It was challenging experience in a multiple ways, but it was also an increadibly educational one and I am very grateful for it.
+
+So Beerus works, the stateless & trustless* (that's right, with an asterisk, more about it later) light-client can be run on modest hardware (like Raspberry Pi) and in a browser through WebAssembly (potentially allowing embedding it in a wallets).
+
+### WebAssembly Support
+
+Even though describing efforts that were necessary to introduce WebAssembly support takes only a paragraph above, the necessary pieces involve learning and patching 4 (four!) external dependencies and also coming up with a tricky way to make it all work together.
+
+The necessary patches include:
+
+* helios
+  - [branch: beerus-wasm](https://github.com/sergey-melnychuk/helios/commits/beerus-wasm/)
+  - patch hard-coded URLs with cors-proxy prefix
+  - extract a standalone feature for building Beerus
+* sequencer/blockifier
+  - [branch: beerus-wasm](https://github.com/sergey-melnychuk/sequencer/commits/beerus-wasm/)
+  - use `Arc` instead of `Rc`
+  - align `no_std`-based build with cairo and cairo-vm
+* cairo-vm
+  - [branch: beerus-wasm](https://github.com/sergey-melnychuk/cairo-vm/commits/beerus-wasm/)
+  - make builtin runners thread-safe
+  - align respective `Mutex::lock` calls
+  - align `no_std`-based build with sequencer and cairo
+* cairo
+  - [branch: beerus-wasm](https://github.com/sergey-melnychuk/cairo/commits/beerus-wasm/)
+  - use `u64` explicitly instead of `usize` (`usize` in `wasm32` is 32 bits long) 
+  - align `no_std`-based build with sequencer and cairo-vm
+
+Simple proof-of-concepts with WebAssembly:
+* [wasm-json-demo](https://github.com/sergey-melnychuk/wasm-json-demo)
+  - shows basic JSON and HTTP client usage from WebAssembly
+* [wasm-webworker-demo](https://github.com/sergey-melnychuk/wasm-webworker-demo)
+  - shows setting up a WebWorker and communicating with it
+
+It was a huge effort, fighting through effectively tight coupling between `seqnencer/blockifier`, `cairo-vm` and `cairo`, fixing things that were already celebrated and declared as working (looking at you `no_std`), navigating and resolving transitive dependencies to compatible versions. A lot of fun that I don't wish to anyone who is unprepared to spend endless hours debugging code, dependencies and decoupling things that should have never been coupled in the first place. Don't get me wrong, I am not whining nor complaining, projects at this scale have a lot of both essential and accidental complexity. I am though proud of myself for pushing things through: on my own, without anyone to reach out for help to, simply because no one ever tried actually building all those things to be compatible with WebAssembly runtime. At this point in time I am ready to admit that there might be a more easy way to achieve what I did, but yet at the same time I am not aware of such a way and I am 100% sure no one else is aware of it as well.
+
+### Going further
+
+At this time Beerus has a very significant limitation: it only is aware of the state committed to L1/Ethereum. There is a rather large delay between the tip of L2/Starknet and the state committed to L1. Also at this time to the best of my knowledge there is no Distributed Sequencer awailable, meaning there is no L2 consensus running, which in turn means there is no way for a light-client to query the tip of L2.
+
+Beerus relies on Helios to query Starknet Core Contract on Ethereum, and Helios in turn relies on Ethereum consensus client that can provide confidence levels for a broadcasted block headers. As long as there are no similar capacity in Starknet at this time due to lack of L2 consensus running among Decentralized Sequencers infrastructure unfortunately I must admit I don't see a way to query L2 tip in a safe & trustless manner.
+
+At this time one possible workaround might be to actually **trust** the RPC data: rely on running own full-node (Pathfinder/Juno/Papyrus etc) or verifying the RPC data from multiple service providers (say Infura and Alchemy). If such trust is acceptable, then switching to [L2-mode](https://github.com/eigerco/beerus/issues/657) is a reasonable way to keep Beerus stateless but not completely trustless though. Until the sequencer is decentralized, Beerus can query the feeder gateway directly in a centralized fashion (similar to Pathfinder) to verify that RPC data actually make sense (e.g. block height, hash and root from RPC matches the respective counterparts returned from the feeder gateway).
+
+So the way I see it logical next steps for Beerus might be:
+1. Add verification of contract classes using `pathfinder_getClassProof`
+  - this method allows verifying compiled class hash against trie
+  - verifying that contract matches the compiled contract class is tricky though
+    - this is the fundamental "blind spot" of Beerus at this point
+    - it is caused by the complexity of compiling contract classes
+    - which is caused by multiple versions of Cairo and compilers available
+1. Introduce "L2 mode" until the sequencer is decentralized
+  - add sanity check of RPC data against the feeder gateway directly
+  - in such mode Helios is no longer necessary and can be removed completely
+1. Introduce L2 consensus client to keep track of the tip of the L2 chain.
+  - such client should be capable of discovering the most recent announced block
+  - and to verify provided proofs/signatures to ensure to trusted party is needed
+1. Provide all above as a library for both native and wasm32 environments
+  - such library can be used in embedded/constrained environments
+  - it will also allow cross-chain communications such as bridging
+
+### Summary
+
+It was a very productive year for Beerus, we made significant progress and enabled a new way of using light client for Starkent via WebAssembly that was not available (probably even possible) before. I am full of hope and excitement about what 2025 might bring! 
+
+Happy New Year!
+
+![GitHub: Beerus Contributors 2024]({{ site.url }}/assets/2024-12-30-beerus-in-2024/beerus-contributors-2024.png)
+(Source: [github](https://github.com/eigerco/beerus/graphs/contributors?from=2024-01-01&to=2024-12-30&type=c))
+
+*P.S. No LLMs were used while writing this post. Just a good old braindump. The text might contain mistakes and figures of speech coming from a non-native English speaker.*
