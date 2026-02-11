@@ -1,0 +1,215 @@
+---
+layout: post
+title: "Elliptic Curves math in Rust"
+date: 2026-02-11 02:27:01 +0100
+categories: elliptic-curves cryptography rust biliniear-pairing zero-knowledge-proofs snark
+---
+
+TL/DR: [ecc](https://github.com/sergey-melnychuk/ecc) - porting ["Elliptic Curve Cryptography for Developers"](https://www.manning.com/books/elliptic-curve-cryptography-for-developers) from C/GMP to Rust, chapter by chapter. From modular arithmetic to a working SNARK in ~3700 lines.
+
+### Motivation
+
+After [learning ZK proofs]({{ site.url }}{% post_url 2025-12-06-learninig-zk %}) through Circom, Noir, and Halo2, I had a working understanding of circuits and proof systems but still felt shaky on the math underneath. I could *use* pairings and polynomial commitments, but I could not *derive* them from first principles. The gap between "I can call `Bn254::pairing(a, b)`" and "I understand why this works" was bothering me.
+
+Michael Rosing's book "Elliptic Curve Cryptography for Developers" covers exactly this ground: from modular arithmetic all the way to building a SNARK, with working C code at every step. The code uses GMP (GNU Multiple Precision Arithmetic Library) for big integers. I decided to port it to Rust chapter by chapter, because rewriting code in a different language forces you to understand every line - you can not just copy-paste and hope for the best.
+
+![source: [Manning](https://www.manning.com/books/elliptic-curve-cryptography-for-developers)]({{ site.url }}/assets/2026-02-11-eec-rust/ecc-book.png)
+
+### Chapter 2: Modular arithmetic
+
+The foundation of everything. All elliptic curve math operates in finite fields GF(p), where every operation is taken modulo a prime p. The Rust version wraps the `rug` crate (Rust bindings to GMP) in a `Modulus` struct:
+
+```rust
+pub struct Modulus {
+    pub n: Int,
+}
+
+impl Modulus {
+    pub fn add(&self, a: &Int, b: &Int) -> Int {
+        Int::from(a + b).modulo(&self.n)
+    }
+
+    pub fn mul(&self, a: &Int, b: &Int) -> Int {
+        Int::from(a * b).modulo(&self.n)
+    }
+
+    pub fn inv(&self, a: &Int) -> Option<Int> {
+        match a.clone().invert(&self.n) {
+            Ok(inverse) => Some(inverse),
+            Err(_) => None,
+        }
+    }
+}
+```
+
+Division in a finite field is multiplication by the modular inverse. The inverse exists if and only if `gcd(a, n) = 1`, which is always true when n is prime and a is nonzero. Simple, but everything else is built on top of this.
+
+The most interesting part of chapter 2 is Tonelli-Shanks: computing square roots modulo a prime. Given `a`, find `x` such that `x^2 = a mod p`. Not every element has a square root (quadratic residues vs non-residues), and when `p = 3 mod 4` the answer is just `x = a^((p+1)/4)`. But when `p = 1 mod 4`, you need the full Tonelli-Shanks algorithm, which is essentially a discrete logarithm trick. This is the same algorithm that shows up later when computing square roots of *polynomials* over extension fields.
+
+### Chapter 3: Elliptic curves
+
+A curve `y^2 = x^3 + ax + b` over GF(p). Points on the curve form a group under a geometric addition law. The Rust implementation:
+
+```rust
+pub struct Curve {
+    pub modulus: Int,
+    pub order: Int,
+    pub base: Point,
+    pub a: Int,
+    pub b: Int,
+}
+
+impl Curve {
+    pub fn add(&self, p: &Point, q: &Point) -> Point {
+        // "side-channel proof" addition using the unified formula
+        let (num, den) = if m.add(&p.y, &q.y).is_zero() {
+            (m.sub(&q.y, &p.y), m.sub(&q.x, &q.y))
+        } else {
+            let num = m.add(
+                &m.add(&m.mul(&p.x, &p.x), &m.mul(&p.x, &q.x)),
+                &m.add(&m.mul(&q.x, &q.x), &self.a),
+            );
+            let den = m.add(&p.y, &q.y);
+            (num, den)
+        };
+        let lambda = m.div(&num, &den).expect("lambda");
+        // ...
+    }
+}
+```
+
+The book uses the "unified" addition formula that works for both point addition (P != Q) and point doubling (P == Q), which avoids timing side-channels. Scalar multiplication is the standard double-and-add: scan the bits of k from most significant to least, double the accumulator at each step, and add P when the bit is 1.
+
+Two curves are implemented: a custom 256-bit curve from the book, and BN254 (the pairing-friendly curve used in Ethereum's precompiles and Groth16).
+
+### Chapters 4-5: DHKE and ECDSA
+
+With the curve arithmetic in place, the classic protocols fall out naturally:
+
+```rust
+fn sign(ec: &Curve, hash: &Int, sk: &Int) -> (Int, Int) {
+    let k = hash_n(&[
+        sk.to_string_radix(16).as_bytes(),
+        hash.to_string_radix(16).as_bytes(),
+    ]);
+    let k = k.modulo(&ec.order);
+    let rx = ec.mul(&ec.base, &k).x.modulo(&ec.order);
+
+    let m = &Modulus::new(&ec.order);
+    let s = m.mul(
+        &m.inv(&k).expect("k^(-1)"),
+        &m.add(&hash, &m.mul(&rx, sk)),
+    );
+    (rx, s)
+}
+```
+
+This is the third time I've implemented ECDSA (first with [arkworks]({{ site.url }}{% post_url 2023-11-22-rust-arkworks-ecdsa %}), then in the [ZKP project]({{ site.url }}{% post_url 2025-12-06-learninig-zk %})), and each time the understanding gets deeper. With arkworks you call library functions. With this implementation, the modular arithmetic is right there, one layer down.
+
+### Chapters 7-8: Polynomial arithmetic
+
+This is where the book starts building toward pairings. Extension fields GF(p^k) are represented as polynomials modulo an irreducible polynomial of degree k. Just like integers mod p, except now everything is polynomials mod f(x).
+
+The key optimization is the multiplication preprocessing table: instead of doing polynomial long division after every multiplication, pre-compute what x^n, x^(n+1), ..., x^(2n-1) reduce to modulo the irreducible polynomial, then use those to fold the upper coefficients back down.
+
+```rust
+pub fn mul(&self, that: &Self, irreducible: &Self, m: &Modulus) -> Self {
+    // Standard polynomial multiplication to get double-length result
+    let r = self.degree() + that.degree();
+    let mut ret = Self::zeros(r + 1);
+    for i in 0..=r {
+        for j in 0..=i {
+            let x = m.mul(&self.get(i), &that.get(i - j));
+            let k = m.add(&ret.get(i), &x);
+            ret.set(i, k);
+        }
+    }
+
+    // Reduce using precomputed table
+    let table = irreducible.mulprep(m);
+    for i in irreducible.degree()..r {
+        for j in 0..irreducible.degree() {
+            let t = m.mul(&ret.get(i), &table[i][j]);
+            let k = m.add(&out.get(j), &t);
+            out.set(j, k);
+        }
+    }
+    out
+}
+```
+
+This table-based reduction is elegant: it turns what would be repeated polynomial division into a simple matrix-vector multiply. The book explains it well, but implementing it is where the understanding really sticks.
+
+### Chapters 9-18: The missing middle
+
+This is the part I'm still working through. The C code in the book covers:
+
+- **Polynomial Euclidean division and GCD** - the same algorithms as for integers, but with polynomials
+- **Finding irreducible polynomials** - using the Ben-Or algorithm to find f(x) that cannot be factored over GF(p)
+- **Polynomial square roots** - Tonelli-Shanks generalized to polynomials over extension fields
+- **Resultants** - a tool for determining if two polynomials share a root, used for quadratic residue testing in extension fields
+- **Elliptic curves over extension fields** - the same point addition and scalar multiplication, but with polynomial coordinates instead of integers
+- **Bilinear pairings** - Miller's algorithm computing the Weil and Tate pairings
+- **BLS signatures** - aggregate signatures using pairings
+
+Each of these chapters builds on the previous ones. The polynomial GCD needs Euclidean division. Finding irreducible polynomials needs the GCD. The polynomial square root needs the resultant, which needs pseudo-division. Pairings need elliptic curves over extension fields, which need polynomial arithmetic. Everything stacks.
+
+The C code for these chapters is in the repository's `aux/` directory as reference. The porting is methodical: read the chapter, understand the algorithm, read the C implementation, then rewrite in Rust matching the existing module style.
+
+### Chapter 19: SNARK
+
+The culmination. With all the machinery in place - finite fields, elliptic curves, extension fields, pairings - a SNARK is "just" a specific way of using these tools to prove knowledge of a satisfying assignment to an arithmetic circuit.
+
+```rust
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // Load system parameters (curve, field, torsion group)
+    let sys = SigSystem::load("curve_11_parameters.bin")?;
+
+    // Create QAP from arithmetic circuit
+    let qap = create_example_qap(&sys.tor);
+
+    // Trusted setup: generate Common Reference String
+    let crs = Crs::generate(&qap, &sys);
+
+    // Prover creates proof for: medicine=2036, dose=1700000, patient=49
+    let prover = Prover::new(sys.clone(), qap, crs.clone());
+    let record = prover.prove(
+        &Int::from(2036),     // medicine (public)
+        &Int::from(1700000),  // dose (public)
+        &Int::from(49),       // patient (private witness)
+    );
+
+    // Verifier checks proof without learning the witness
+    let verifier = Verifier::new(sys, crs);
+    let valid = verifier.verify(&record);
+    // ✓ VERIFICATION PASSED
+}
+```
+
+The verification equation is the familiar pairing check: `e(A, B) = e(αG, βH) · e(V, γH) · e(C, δH)`. But now I understand *why* each term is there. The "toxic waste" (α, β, γ, δ) from the trusted setup binds the proof to the specific QAP, and the bilinear property of pairings is what makes the verification work without revealing the witness.
+
+### The value of porting C to Rust
+
+Converting C code to Rust is not just a mechanical translation. The C code uses `mpz_t` pointers everywhere, manual `init`/`clear` for memory management, and mutable output parameters. The Rust version uses owned values, `Clone`, and return values. Every function signature change forces you to think about data flow.
+
+For example, the C code:
+```c
+void poly_mul(POLY *rslt, POLY a, POLY b);
+```
+
+Becomes:
+```rust
+pub fn mul(&self, that: &Self, irreducible: &Self, m: &Modulus) -> Self
+```
+
+The Rust version makes the dependencies explicit: you can see that multiplication needs both the irreducible polynomial and the modulus. In C, these are global statics. Making them explicit parameters reveals the architecture.
+
+The `rug` crate (Rust bindings to GMP) handles the big integer arithmetic, so performance is comparable to the C version. The interesting part is not the speed but the clarity: Rust's type system and ownership model make the data flow visible in a way that C's pointer-based code does not.
+
+### What's next
+
+The chapters 9-18 are the current focus - porting the extension field polynomial operations, pairings, and signatures from C to Rust. The C reference code is all there in the `aux/` directory, and the Rust module structure is ready to receive it.
+
+Building a SNARK from absolute scratch - from modular arithmetic through elliptic curves through pairings to the final verification equation - is the deepest possible way to understand how zero-knowledge proofs work. Every layer depends on the one below it, and there is no way to skip ahead without understanding the foundations.
+
+Full code: [github.com/sergey-melnychuk/ecc](https://github.com/sergey-melnychuk/ecc)
