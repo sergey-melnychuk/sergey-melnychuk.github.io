@@ -5,6 +5,9 @@ Blog on software engineering
 ## Install rvm (https://rvm.io/)
 curl -sSL https://get.rvm.io | bash -s stable
 
+## https://github.com/rvm/rvm/issues/5189
+brew uninstall capstone
+
 # https://github.com/rbenv/ruby-build/discussions/2053#discussioncomment-6725967
 rvm install 3.1.2 --with-openssl-dir=$(brew --prefix openssl@3)
 
