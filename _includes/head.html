@@ -68,4 +68,11 @@
 
   {% include fonts.html %}
   {% include google_analytics.html %}
+
+  <!-- https://stackoverflow.com/a/79314539 -->
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({startOnLoad:true,theme:'neutral'})
+    await mermaid.run({querySelector:'code.language-mermaid'})
+  </script>
 </head>
