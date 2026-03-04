@@ -1,7 +1,7 @@
 ---
 layout: post
 title: "Deterministic Deposit Proxy in Solidity"
-date: 2026-02-12 16:07:00 +0100
+date: 2026-03-04 23:09:00 +0100
 categories: solidity rust ethereum sepolia proxy
 ---
 
@@ -18,11 +18,13 @@ This post walks through the architecture, contract design, Rust backend, React U
 
 ## Problem
 
-For deposit-based flows, deterministic addresses are useful because you can:
+A user should be able to see their deposit address immediately, without waiting for an on-chain transaction. Deterministic addresses make this possible:
 - generate a destination address before deployment,
 - share it immediately with users,
 - deploy only when needed (or batch deploy later),
 - keep address generation consistent across backend and on-chain logic.
+
+An EVM address can receive ETH before any contract is deployed there. CREATE2 guarantees the address is deterministic, so the backend can predict it, share it, and deploy later — the funds will be waiting.
 
 The challenge is making this practical end-to-end:
 - contract side (CREATE2 + minimal proxies + permissions),
@@ -113,6 +115,8 @@ function calculateDestinationAddresses(
 
 ### 2) FundRouter + FundRouterStorage
 
+Each proxy is an EIP-1167 minimal proxy that `delegatecall`s into `FundRouter`. This means inside `transferFunds`, `address(this)` refers to the *proxy* — which is where the deposited funds actually live. The router implementation is shared, but each proxy operates on its own balance. The proxy also has `receive() external payable {}`, so it can accept plain ETH transfers before or after deployment.
+
 `FundRouter` routes ETH and optional ERC20s, gated by storage permissions:
 - `isAllowedCaller(msg.sender)` must be true,
 - `isAllowedTreasury(treasury)` must be true,
@@ -123,7 +127,8 @@ function calculateDestinationAddresses(
 
 Why this split:
 - router logic remains focused on transfer behavior,
-- permission policy is isolated and replaceable.
+- permission policy is isolated and replaceable,
+- iterating on permissions doesn't require redeploying the router or re-creating proxies.
 
 ```solidity
 // FundRouterStorage — bitmask permission checks
@@ -164,9 +169,32 @@ function transferFunds(
 }
 ```
 
+A note on the ETH transfer: `.call{value:}` is used instead of `.transfer()` because the latter forwards only 2300 gas, which can fail if the treasury is a contract with a non-trivial `receive()`. The trade-off is reentrancy exposure — but here the caller is already permissioned, and the function performs no state changes after the external call that an attacker could exploit.
+
 ---
 
 ## Rust Backend Design
+
+### Contract Bindings
+
+The backend uses [alloy](https://github.com/alloy-rs/alloy) with the `sol!` macro to generate type-safe Rust bindings directly from Solidity interfaces:
+
+```rust
+sol! {
+    #[sol(rpc)]
+    interface IDeterministicProxyDeployer {
+        function calculateDestinationAddresses(
+            bytes32[] calldata salts
+        ) external view returns (address[] memory);
+
+        function deployMultiple(
+            bytes32[] calldata salts
+        ) external returns (address[] memory);
+    }
+}
+```
+
+This gives typed method calls (`deployer.calculateDestinationAddresses(salts).call().await?`) instead of hand-encoding ABI payloads.
 
 ### API Surface
 
@@ -179,10 +207,40 @@ function transferFunds(
   - filter by user/salt/address/status
   - paging via `limit/offset`
 - `POST /api/route`
-  - selects `pending/proxied`
-  - deploys missing proxies
-  - routes balances to treasury
-  - updates DB status and returns tx hashes
+  - two-phase routing (see below)
+
+### Routing: Two-Phase Workflow
+
+The `POST /api/route` endpoint executes a two-phase process:
+
+**Phase 1 — Deploy.** Collect all `pending` deposits, filter out those whose proxy already has code on-chain, and batch-deploy the rest:
+
+```rust
+let mut non_proxies = Vec::new();
+for (address, salt) in predicted.into_iter().zip(salts.into_iter()) {
+    let code = provider.get_code_at(address).await?;
+    if code.is_empty() {
+        non_proxies.push(salt);
+    }
+}
+```
+
+This makes deployment idempotent — re-running route on partially deployed deposits won't revert.
+
+**Phase 2 — Sweep.** Each deposit is mapped to an async closure that calls `route_funds` and updates the DB row, then all closures run concurrently via `try_join_all`:
+
+```rust
+let txs = futures::future::try_join_all(
+    deposits.into_iter().map(|deposit| {
+        let state = state.clone();
+        async move {
+            eth::route_funds(/* proxy, treasury */).await
+        }
+    })
+).await?;
+```
+
+The fan-out is concurrent but not batched — works fine for dozens of deposits but would need a proper job queue at scale.
 
 ### Persistence Model
 
@@ -193,6 +251,8 @@ SQLite table stores:
 - `status` (`pending`/`proxied`/`routed`),
 - `balance` (32-byte blob, nullable),
 - timestamps.
+
+Addresses and salts are stored as fixed-length BLOBs with `CHECK(length(...))` constraints, not hex strings. This keeps storage compact and avoids case-sensitivity issues with hex comparisons.
 
 ### Monitoring Loop
 
@@ -231,29 +291,75 @@ async fn poll_balances(state: Arc<AppState>) -> anyhow::Result<()> {
 
 ## Frontend Design
 
-The frontend is intentionally operational and minimal:
-- a single page dashboard,
-- inline filtering (status/user/address),
-- paging and refresh controls,
-- actions per row (`Deploy`/`Route`),
-- error modal and copy-to-clipboard UX.
+The frontend is a single-page operational dashboard: inline filtering (status/user/address), paging, refresh controls, per-row actions (`Deploy`/`Route`), error modal and copy-to-clipboard.
 
-Notable implementation details:
-- same-origin API (`/api`) to keep deployment simple,
-- copy fallback for non-HTTPS environments (`execCommand`) for demo hosting,
-- typed data model for deposit rows.
+One detail worth highlighting — the `weiToEth` conversion uses `BigInt` to avoid floating-point precision loss:
+
+```typescript
+export function weiToEth(hexWei: string): string {
+  const raw = hexWei.startsWith("0x") ? hexWei.slice(2) : hexWei;
+  if (!raw || /^0+$/i.test(raw)) return "0";
+  const wei = BigInt("0x" + raw);
+  const div = BigInt(10) ** BigInt(18);
+  const int = wei / div;
+  const frac = (wei % div).toString().padStart(18, "0").replace(/0+$/, "");
+  if (!frac) return int.toString();
+  const decimals = frac.slice(0, 6);
+  return `${int}.${decimals}`;
+}
+```
+
+ETH balances are 256-bit integers. `Number` loses precision beyond 2^53, which is about 0.009 ETH in wei — well within realistic deposit amounts. `BigInt` division and modulo give exact results, then string formatting handles the decimal point and trailing zeros.
 
 ---
 
 ## Testing Strategy
 
-I added tests across all three layers.
+Tests cover all three layers:
 
-| Layer | Tooling | Coverage |
-|---|---|---|
-| Contracts | Hardhat + Chai | 18 tests: permission checks, deterministic prediction, multi-deploy, duplicate salts, end-to-end deploy+fund+route |
-| Backend utilities | Rust unit tests | hex decode/encode/validation, keccak vectors, determinism |
-| Frontend | Vitest + Testing Library | `weiToEth` formatting, initial fetch rendering, create-deposit payload, error modal path |
+- **Contracts** (Hardhat + Chai, 18 tests) — permission checks, deterministic prediction, multi-deploy, duplicate salt rejection, end-to-end deploy+fund+route.
+- **Backend** (Rust unit tests) — hex decode/encode/validation, keccak256 known vectors, roundtrip determinism.
+- **Frontend** (Vitest + Testing Library) — `weiToEth` formatting edge cases, initial fetch rendering, create-deposit payload, error modal path.
+
+The most interesting contract test is the end-to-end flow — predict a proxy address, deploy it, fund it with ETH, then route through the proxy to treasury:
+
+```javascript
+it("end-to-end: deploy proxy, fund it, route to treasury", async function () {
+    const salt = ethers.keccak256(ethers.toUtf8Bytes("e2e-salt"));
+
+    const [proxyAddr] = await deployer
+        .connect(caller).calculateDestinationAddresses([salt]);
+    await deployer.connect(caller).deployMultiple([salt]);
+
+    await caller.sendTransaction({
+        to: proxyAddr, value: ethers.parseEther("0.5") });
+
+    await storage.setPermissions(caller.address, 0x01);
+
+    // Call transferFunds on the proxy (delegatecalls to FundRouter)
+    const routerAbi =
+        (await ethers.getContractFactory("FundRouter")).interface;
+    const proxyAsRouter =
+        new ethers.Contract(proxyAddr, routerAbi, caller);
+
+    await proxyAsRouter.transferFunds(
+      ethers.parseEther("0.5"), [], [], treasury.address);
+
+    expect(await ethers.provider.getBalance(proxyAddr)).to.equal(0);
+});
+```
+
+Note `new ethers.Contract(proxyAddr, routerAbi, caller)` — the test calls the *proxy* address using the *router* ABI, which is exactly how delegatecall proxies work. The proxy has no ABI of its own; it just forwards everything to the implementation.
+
+Another test verifies caller isolation — the same salt produces different addresses for different callers, thanks to `_deriveSalt`:
+
+```javascript
+const [addr1] = await deployer.connect(caller)
+    .calculateDestinationAddresses([salt]);
+const [addr2] = await deployer.connect(treasury)
+    .calculateDestinationAddresses([salt]);
+expect(addr1).to.not.equal(addr2);
+```
 
 Project-level command:
 
@@ -269,11 +375,25 @@ I optimized for one-command demo deployment:
 
 - multi-stage Docker build:
   1. compile contracts,
-  2. build frontend,
+  2. build frontend (Vite produces a single `index.html` via `vite-plugin-singlefile`),
   3. compile Rust backend,
   4. run as a compact runtime image.
-- frontend static output is embedded and served by Rust.
+- frontend static output is embedded into the Rust binary via `include_str!` and served directly — no separate static file server or reverse proxy needed.
 - deployment works on a clean Ubuntu/DigitalOcean instance with `docker compose up -d --build`.
+
+One practical trick: the Rust `build.rs` creates a fallback `index.html` if the frontend hasn't been built yet, so `include_str!` doesn't break during backend-only development:
+
+```rust
+let index = std::path::Path::new("../app/dist/index.html");
+if !index.exists() {
+    if let Some(parent) = index.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    std::fs::write(index,
+        "<html><body><p>Frontend not built.</p></body></html>",
+    ).ok();
+}
+```
 
 I also used a fast path for low-powered VMs:
 - build image locally for `linux/amd64`,
@@ -305,6 +425,6 @@ The important verification:
 
 The key design decision was making the on-chain contract the single source of truth for address prediction. The Rust backend calls `calculateDestinationAddresses` on the deployed contract rather than reimplementing CREATE2 derivation off-chain, so there's no risk of the two diverging. You could hand-craft proxy bytecode and replicate the address derivation in Rust — but that's working hard, not smart. One implementation to get right, not two to keep in sync.
 
-The separation of `FundRouterStorage` from `FundRouter` felt like overkill at first for a project this size, but it paid off quickly when iterating on permission logic without redeploying the router.
+The `delegatecall` proxy pattern was the most subtle part to get right. It's easy to forget that `address(this)` inside a delegatecall refers to the proxy, not the implementation — which is exactly what makes fund sweeping work (the balance lives at the proxy address), but also means any state variables in the implementation would collide with the proxy's storage. Keeping `FundRouter` stateless and reading permissions from an external `FundRouterStorage` contract avoids this entirely.
 
-If I were to revisit this, I'd spend more time on the routing step — right now it's a synchronous fan-out that would struggle with more than a handful of deposits. A proper job queue with retry semantics would be the natural next step.
+If I were to revisit this, I'd spend more time on the routing step — the `try_join_all` fan-out works for dozens of deposits but doesn't handle partial failures gracefully. A proper job queue with retry semantics and per-deposit error tracking would be the natural next step.
