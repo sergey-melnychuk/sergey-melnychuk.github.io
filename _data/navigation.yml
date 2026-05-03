@@ -3,8 +3,6 @@
 main:
   - title: "Home"
     url: /
-  - title: "Solenoid"
-    url: /solenoid
   - title: "Archive"
     url: /archive/
   - title: "GitHub"

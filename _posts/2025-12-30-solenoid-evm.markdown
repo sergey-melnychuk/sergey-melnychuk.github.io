@@ -5,12 +5,12 @@ date: 2025-12-30 02:31:31 +0100
 categories: ethereum evm rust cancun
 ---
 
-TL/DR: [solenoid](https://github.com/sergey-melnychuk/solenoid) - lightweight, async-first, WASM-friendly Ethereum VM implementation in Rust. ~6800 lines of code, processes real mainnet blocks, runs in a browser. Try it [live]({{ site.url }}/solenoid)!
+TL/DR: [solenoid](https://github.com/sergey-melnychuk/solenoid) - lightweight, async-first, WASM-friendly Ethereum VM implementation in Rust. ~6800 lines of code, processes real mainnet blocks, runs in a browser. ~~Try it [live]({{ site.url }}/2025/12/30/solenoid-evm)!~~
 
 ### Why
 
 ![]({{ site.url }}/assets/2025-12-30-solenoid-evm/solenoid-browser.png)
-(source: screenshot of solenoid tracing mainnet transaction [in a browser]({{ site.url }}/solenoid))
+(source: screenshot of solenoid tracing mainnet transaction ~~[in a browser]({{ site.url }}/2025/12/30/solenoid-evm)~~)
 
 After spending more than a year working on [Beerus]({{ site.url }}{% post_url 2024-12-30-beerus-in-2024 %}) and having to deal with `blockifier`/`sequencer`/`cairo-vm` for Starknet execution, I wanted to understand the Ethereum VM deeply - not from the documentation or someone else's code, but by building one myself from scratch. The idea was simple: take the [Yellow Paper](https://ethereum.github.io/yellowpaper/paper.pdf), implement every opcode, make it async, make it compile to WASM, and validate against real mainnet data.
 
