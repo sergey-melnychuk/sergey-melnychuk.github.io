@@ -1,0 +1,225 @@
+---
+layout: post
+title: "I built EVM from scratch. Again."
+date: 2026-05-23 14:00:00 +0100
+categories: ethereum evm rust wasm security async
+---
+
+TL;DR: [yevm](https://github.com/sergey-melnychuk/yevm) — *(Yield-aware \| Yet another) EVM implementation* — async-first, WASM-native Ethereum VM in Rust, ~12.7K lines across 8 crates. 99.6% on GeneralStateTests at Cancun, cross-validated against revm on Osaka/Fusaka mainnet. Three application layers on top: in-browser simulation, [yevm-lens](https://github.com/sergey-melnychuk/yevm/tree/main/yevm-lens) for decoding execution side effects, and [yevm-gate](https://github.com/sergey-melnychuk/yevm/tree/main/yevm-gate) — a local RPC proxy that holds outgoing transactions until the human approves what they actually do. Try it [live](https://sergey-melnychuk.github.io/yevm).
+
+---
+
+Last year I wrote about [solenoid]({{ site.url }}{% post_url 2025-12-30-solenoid-evm %}), the first EVM I built in Rust to understand the machine from the Yellow Paper up. That post was about the *machine* — opcode dispatch, gas accounting, the executor loop. This one is about what came after: an EVM rebuilt as a library you'd actually embed, and the three things I built on top to find out whether it's useful.
+
+The short version of the answer: yes, if you frame the EVM not as an execution engine but as an *observability primitive*. The interesting code is not the loop that runs opcodes. The interesting code is the loop that *emits structured events* as it runs them, and what you can do downstream with that stream.
+
+### Why a rewrite
+
+Solenoid worked. It processed mainnet blocks, traced execution, ran in WASM. The issues were structural, not bugs:
+
+- The state interface was synchronous-ish, async only by accident.
+- The trace stream was a debug feature bolted on, not the primary output.
+- The crate layout couldn't be sliced — you took all of it or none of it.
+
+`yevm` is the second pass with those three things at the center. The crate split:
+
+```
+yevm-base   primitive types (Acc, Int, Tx, Head, Buf)
+yevm-core   the EVM engine — executor, ops, precompiles, state traits, trace
+yevm-misc   utilities, keccak, hex
+yevm-test   harness + GeneralStateTests + revm cross-validator
+yevm-lens   side-effect decoder over trace events
+yevm-gate   pre-broadcast RPC proxy with sim + human-in-the-loop approval
+yevm-wasm   browser bindings
+yevm        top-level integration
+```
+
+The first three crates (`base`, `core`, `misc`) are what you embed; the last four (`test`, `lens`, `gate`, `wasm`) are *applications* of the EVM, built on top of the same trace stream. None of the application crates know about each other.
+
+### Async-first, not async-on-top
+
+Every external state access in the EVM is a potential network round-trip: `SLOAD`, `BALANCE`, `EXTCODESIZE`, `EXTCODEHASH`, `EXTCODECOPY`, and the implicit account-load on `CALL`/`STATICCALL`/`DELEGATECALL`. In a synchronous EVM you have to pre-fetch state or block the executor thread. Both options are bad: pre-fetching requires you to predict the access set (which the EVM itself decides), and blocking ruins composition.
+
+In yevm the executor is `async` end-to-end, and chain access lives behind a small async trait:
+
+```rust
+#[cfg_attr(not(target_arch = "wasm32"), async_trait::async_trait)]
+#[cfg_attr(target_arch = "wasm32", async_trait::async_trait(?Send))]
+pub trait Chain {
+    async fn nonce(&self, acc: &Acc) -> eyre::Result<u64>;
+    async fn balance(&self, acc: &Acc) -> eyre::Result<Int>;
+    async fn get(&self, acc: &Acc, key: &Int) -> eyre::Result<Int>;
+    async fn code(&self, acc: &Acc) -> eyre::Result<(Buf, Int)>;
+    // ...
+}
+```
+
+Implementations: an `Rpc` that hits a JSON-RPC endpoint, a `Cache` that wraps `Rpc` and remembers fetched state. The executor doesn't care which.
+
+The yield-points are real. Running a single mainnet transaction with a cold cache produces dozens of `eth_getProof` / `eth_call` round-trips, interleaved with pure computation. Async/await composes that naturally with no callback gymnastics, and — the point that ends up mattering most — the *same* executor code runs unchanged inside a browser, with the network calls served by `fetch()` and the futures driven by the browser event loop.
+
+### Trace events as a first-class output
+
+The trace stream is the primary output of execution, not a debug toggle. Every meaningful operation emits a typed event:
+
+```rust
+pub enum Event {
+    WarmKey(Acc, Int),
+    WarmAcc(Acc),
+    Move(Acc, Acc, Int),
+    Get(Target),
+    Put(Target, Int),
+    Hash(Buf, Int),
+    Code(Buf, Int),
+    Log(Vec<Int>, Buf),
+    Call(Call, CallMode),
+    Return(Buf, u64),
+    Revert(Buf, u64),
+    Halt(HaltReason, u64),
+    Undo(usize, usize),   // seq range [from, to) reverted
+    Create(Acc),
+    Delete(Acc),
+    Fee(Acc, Acc, Int, Int, u64),
+    Blob(u64, Int),
+    Step(Step),
+}
+```
+
+Two design choices in here that I keep getting mileage out of:
+
+**Revert handling is out-of-band.** Events stream out as they happen, including from sub-calls that later revert. When a revert occurs, the executor emits `Undo(from, to)` — a sequence range that downstream consumers re-mark as `reverted = true`. The alternative (buffer everything, commit on success) needs unbounded memory and breaks streaming. The chosen alternative lets every consumer choose: ignore reverted events, include them as warnings, or whatever they like. `yevm-lens` ignores them; a debugger would render them differently.
+
+**Hash preimages are observable.** Every `KECCAK256` emits `Hash(input, output)`. That single event is what makes ERC-20 balance-slot detection possible downstream: when you later see a storage write to slot `0xabc...`, you can look up the preimage and discover "this was `keccak256(holder, mapping_slot)` — it's a balance write for holder X". No heuristics, no scanning bytecode. The executor already did the hash; just keep the input.
+
+### Application 1: WASM in the browser
+
+`yevm-core` builds for `wasm32-unknown-unknown` without modification because there is nothing platform-specific in it — no threads, no filesystem, no sync I/O. `yevm-wasm` is a thin layer of `wasm-bindgen` glue that exposes the executor to JS, with `fetch()` standing in for the RPC client.
+
+The full pipeline in the browser:
+
+1. User pastes a tx hash or raw signed tx into the demo UI.
+2. JS calls into the WASM module's `simulate(tx, head)`.
+3. The executor runs, yielding on every state access; each yield becomes a `fetch()` to the configured RPC.
+4. Trace events stream back out as a `Vec<Trace>`.
+5. `yevm_lens::analyse(&traces)` decodes them into a flat `Alerts` struct.
+6. UI renders the decoded side effects.
+
+[![YEVM live demo — proxy swap detected]({{ site.url }}/assets/2026-05-23-yevm/tx.png)](https://sergey-melnychuk.github.io/yevm/?tx=0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882)
+
+The only privacy boundary is the RPC node — it sees `eth_getProof` / `eth_call` queries for the state slots the simulation touches. No one sees the transaction, the signer, the dApp context, or the verdict. Compare to the operational shape of Blockaid / Wallet Guard / Harpie / Hypernative, which ship your candidate transaction to a remote API for scoring. Running the EVM locally in WASM is the only architecture where that guarantee holds by construction, not by trust.
+
+### Application 2: yevm-lens — decoding side effects
+
+The lens crate turns a trace into the answer to the only question a human is really asking before signing: *what is this transaction going to do?*
+
+```rust
+pub struct Alerts {
+    pub proxy_swaps: Vec<ProxySwap>,
+    pub eth_changes: Vec<EthChange>,
+    pub erc20_transfers: Vec<Erc20Transfer>,
+    pub erc20_approvals: Vec<Erc20Approval>,
+    pub erc721_transfers: Vec<Erc721Transfer>,
+    pub forged_transfers: Vec<ForgedTransfer>,
+    pub fee: Option<FeeInfo>,
+}
+```
+
+The two detections I'm most happy with:
+
+**Proxy implementation swap.** The Bybit hack swapped a Safe's implementation to an attacker contract via `DELEGATECALL`. The signers approved the inputs; nobody had the side effects. Lens fires `ProxySwap` when a storage slot whose value looked like an address gets overwritten with a different address-like value, *and* the old implementation was called or loaded earlier in the same transaction. The second filter is what keeps it quiet — real upgrades route through the old impl first, plain state writes don't.
+
+**Forged transfers.** Phishing tokens emit `Transfer` logs without ever moving balance, then drainers wait for the approval that follows. Lens cross-references every `Transfer` log against the actual balance storage writes (using the hash-preimage trick above) and flags log/state mismatches as `ForgedTransfer`. The wallet UI can render the two very differently.
+
+The full crate is one file: [yevm-lens/src/analyse.rs](https://github.com/sergey-melnychuk/yevm/blob/main/yevm-lens/src/analyse.rs).
+
+### Application 3: yevm-gate — pre-broadcast hold
+
+`yevm-gate` is the productized version of the principle. It's a local HTTP server that speaks JSON-RPC, designed to sit between your wallet and your upstream node:
+
+```
+wallet ──▶ yevm-gate ──▶ owner (pending approval)
+               │
+               └── decode · simulate · analyse · hold
+
+owner ──approve ──▶ upstream RPC
+owner ──reject ──▶  (drop)
+```
+
+The wallet thinks the transaction was sent. The transaction is *not* sent. It sits in `pending` state until the owner authenticates and explicitly approves or rejects:
+
+```rust
+async fn intercept_send_raw(state: Shared, body: Value) -> Result<Json<Value>, AppError> {
+    let raw = /* extract params[0] */;
+    let decoded = decode::decode_raw(&raw)?;
+    let hash = format!("{}", decoded.tx.hash);
+
+    db::insert(&state.pool, &hash, &decoded.call.by, &raw, &sim_init).await?;
+    state.pending.write().await.insert(hash.clone(), PendingTx { /* ... */ });
+    spawn_sim(state, hash.clone(), decoded.call, decoded.tx);
+
+    Ok(Json(json!({ "jsonrpc": "2.0", "id": id, "result": hash })))
+}
+```
+
+Auth is SIWE-style: server issues a nonce, owner signs it with the same key that signed the transaction, server hands back a bearer token. Only the signing address (or a configured admin) can see and act on a pending tx. Approve forwards the raw transaction to the upstream node; reject drops it.
+
+This shape — *the wallet doesn't know the difference, the gate runs locally, the owner is the only party that can release the tx* — is the thing I keep coming back to. It doesn't require wallet integration, hardware-wallet vendor cooperation, or anything cooperating. You point your wallet's RPC at `localhost:8000` and you've inserted a human-in-the-loop step that the entire stack downstream cannot bypass.
+
+### Correctness
+
+Two weeks from a blank editor to 99.6% Cancun coverage. Two more months to close Osaka/Fusaka and hunt down the edge cases — transient storage, EIP-7702 delegation chains, the kinds of contracts that only appear on mainnet and never in test suites.
+
+Two ways the EVM is validated:
+
+**GeneralStateTests at Cancun.** The Ethereum Foundation's [tests repo](https://github.com/ethereum/tests) covers every opcode, every gas edge case, every pre-compile, across every hard-fork. Yevm passes 99.6% of the Cancun set; the missing tests are mostly EIPs I have deferred (the test harness in `yevm-test` skips them by name).
+
+**Cross-validation against revm.** [yevm-test/src/revm.rs](https://github.com/sergey-melnychuk/yevm/blob/main/yevm-test/src/revm.rs) wraps revm in an `Inspector` that produces the same `Step` events yevm emits, runs both implementations on the same transaction, and diffs the traces. This catches divergences the official tests don't reach: real mainnet contracts doing unusual things with `EXTCODECOPY`, `MCOPY`, transient storage, EIP-7702 delegations. (The official test suite targets Cancun; revm cross-validation extends coverage forward to Osaka/Fusaka, where no official test suite yet exists.) Convergence with revm is the practical correctness story, since revm is the de facto reference for production EVMs in Rust.
+
+### Performance
+
+373 mainnet transactions from a randomly chosen mainnet block, offline prefetched state, 1000 iterations: **77ms per block** — well under the 12-second block time. Starting point was 360ms; the gap closed through generic dispatch to eliminate vtable overhead, stack-allocated warmup buffers, direct PUSH slice reads, and gating trace-only allocations behind `is_tracing()`.
+
+### What's next
+
+1. **Per-signer touched-set baseline.** Bybit landed on an implementation address none of the signers had ever interacted with before. A per-signer baseline of every address touched at any call depth, in the signer's history, catches a novel `DELEGATECALL` target with one extra check on top of what lens already does. The set stays small enough to ship client-side as a bloom filter.
+
+2. **Opcode-weighted severity in lens.** Every alert is presented flat today; in practice a novel `DELEGATECALL` target should scream and a novel `STATICCALL` should whisper. The infrastructure is there; the policy isn't written yet.
+
+3. **Make yevm-gate into a service.** Running it locally is a one-command setup, but the same gate can run on a server — approvals authenticated by the owner's wallet signature, transactions held until released. Not an architectural change; just deployment.
+
+4. **Glamsterdam readiness.** EIP-7782 proposes halving the slot time to 6 seconds. At 77ms per block yevm is already comfortable at 12s; the margin at 6s is thinner, and the gate's human-approval window shrinks proportionally. The plan: profile the hot path under 6-second timing, validate the new EIPs in the test harness, and make sure gate's UX doesn't become a footgun when blocks arrive twice as fast.
+
+### Running it
+
+```bash
+git clone https://github.com/sergey-melnychuk/yevm
+cd yevm
+cargo test --workspace
+```
+
+To run the gate as a local RPC proxy:
+
+```bash
+export YEVM_RPC_URL="https://your-upstream-node/..."
+export YEVM_PROXY_BIND="127.0.0.1:8000"
+cargo run -p yevm-gate
+# point your wallet's RPC at http://localhost:8000
+# open http://localhost:8000 in a browser to authenticate and approve/reject
+```
+
+To build the WASM bundle:
+
+```bash
+cd yevm-wasm
+wasm-pack build --target web --release
+python3 -m http.server 8000
+# open http://localhost:8000/demo.html
+```
+
+Or just open the [live demo](https://sergey-melnychuk.github.io/yevm).
+
+---
+
+**Disclaimer.** yevm is a research project, not an audited production system. The EVM is correct enough to validate against mainnet; the application layers (lens, gate) are correct enough to be useful but not enough to be load-bearing for real money without further hardening. The lens decoders are pattern-based and a determined attacker who knows the patterns can shape execution to slip past one of them. Use it to learn, to instrument, to prototype — not to gate a treasury.
+
+Full code: [github.com/sergey-melnychuk/yevm](https://github.com/sergey-melnychuk/yevm). Talk slides: [sergey-melnychuk.github.io/yevm/deck](https://sergey-melnychuk.github.io/yevm/deck). Prior post on the EVM itself: [Ethereum VM impl from scratch in Rust]({{ site.url }}{% post_url 2025-12-30-solenoid-evm %}).
