@@ -312,9 +312,11 @@ To make the whole pipeline runnable from the command line, [`bin/search`](https:
 $ cargo run --release --bin search -- 7 50
 # Searching for pairing-friendly curves: k = 7, log2(r) ≤ 50
 
-Found 6 candidate(s). Top by rho:
+Found 4 candidate(s). Top by rho:
   [0] alpha = 11, x = 1, rho = 1.2381, |r| = 21b, |q| = 26b
-  ...
+  [1] alpha = 15, x = 3, rho = 1.2791, |r| = 43b, |q| = 55b
+  [2] alpha = 135, x = 1, rho = 1.2791, |r| = 43b, |q| = 55b
+  [3] alpha = 87, x = 1, rho = 1.2821, |r| = 39b, |q| = 50b
 
 # Building a curve from the first viable candidate...
   [0] CM discriminant: D = -11
@@ -347,7 +349,7 @@ Porting forces you to look at the original code carefully, and a few real bugs s
 - **`Polynomial::degree()` underflow** — empty polynomials (post-`trim()`) underflowed `coef.len() - 1` on `usize`. Now uses `saturating_sub`.
 - **`Polynomial::normal` / `inv` un-reduced coefficients** — these called `Modulus::inv` on the raw leading coefficient, which would panic when the value was `0 mod p` but stored as a nonzero `Int`. Now reduces mod p first.
 - **`Modulus::sqrt` Tonelli–Shanks** — the slow path (the case `p ≡ 1 mod 4`) had *two* bugs that compounded into an `unreachable!()` panic: the non-residue search broke on residues instead of non-residues (inverted condition), and the inner loop's iteration variable was off-by-one. Neither was caught earlier because every previously-used curve had `p ≡ 3 mod 4` and took the fast path. The slow path was first exercised by loading `curve_11` for BLS, which has `p ≡ 1 mod 4`. Rewritten following the standard Wikipedia formulation, with a regression test on `p = 13`.
-- **`poly_sqrt` brute-force fallback** — the polynomial Tonelli–Shanks in `poly_elliptic.rs` had the same off-by-one as the modular one, but during chapter 16 development I papered over it with a brute-force "try every element of GF(p^k)" fallback. After fixing the modular version, the same rewrite worked for the polynomial version, and the fallback came out clean.
+- **`poly_sqrt` Tonelli–Shanks lift** — applied the same fix to the polynomial version (`poly_elliptic.rs`). The lifted T-S still has a genuine edge case on very small fields: when the algorithm's `M` reaches 1 and the working `t` becomes -1, completing the sqrt would require multiplying by sqrt(-1) ∈ GF(p^k), which the standard T-S formulation doesn't expose. For the `F_43²` demo curve this happens often enough to matter, so a brute-force fallback (`O(p^k)`, only viable for pk ≤ 2²⁰) catches what T-S can't reduce. On production-sized curves T-S handles everything.
 - **`gpow_p2` misleading docstring** — the comment claimed "Euler criterion" but the function computes `a^((p-1)/2)` with the *base* prime, not `(p^k-1)/2`. It's correct for its actual use case (the Cantor–Zassenhaus split step in F_p, which is now the only caller besides tests), but the docstring was lying. Rewritten to say what the function really does.
 
 Every one of these has a test pinning the new behavior.
@@ -371,10 +373,10 @@ Each new module ships with its own tests:
 |--------|-------|------------|
 | `poly_elliptic` | 8 | doubling, identity, scalar associativity, order via factor sweep |
 | `poly_elliptic::sqrt_test` | 2 | polynomial Tonelli–Shanks against random squares |
-| `pairing` | 7 | cardinality formula, Weil/Tate bilinearity, alternating, torsion-root |
+| `pairing` | 8 | cardinality formula, Weil/Tate bilinearity, alternating, torsion-root |
 | `bls` | 9 | tiny + real-curve sign/verify, tamper rejection, key swap, aggregate |
 | `curve_search` | 5 | Φ_{4k} sanity, the `(q+1-t) mod r = 0` relation, sweep finds candidates |
-| `cm_curve` | 10 | HCP parse + lookup, CZ on cubic & quartic, `D=-11/p=23` curve, curve_11 |
+| `cm_curve` | 11 | HCP parse + lookup, CZ on cubic & quartic, `D=-11/p=23` curve, curve_11 |
 | `elliptic` (new) | 6 | `[order]·G = O` for all four book curves, `.dat` loader round-trip |
 
 Plus four new binaries:
