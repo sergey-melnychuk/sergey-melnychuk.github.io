@@ -1,0 +1,156 @@
+---
+layout: post
+title: "yevm-gate vs. the Bybit hack"
+date: 2026-09-05 16:12:42 +0100
+categories: ethereum evm rust security yevm-gate multisig
+---
+
+TL;DR: [yevm-gate](https://github.com/sergey-melnychuk/yevm/tree/main/yevm-gate) holds a signed transaction between signature and broadcast, simulates the actual signed bytes client-side in the browser via WASM, and shows the real side effects before you decide to send it. Replayed against the Bybit exploit tx, it flags the proxy-implementation swap and the never-touched destination address that $1.5B slipped past. Live at [gate.0xff.wtf](https://gate.0xff.wtf).
+
+![yevm-gate — verify the side-effects, not the blob](/assets/2026-09-05-yevm-gate/banner.png)
+
+On February 21, 2025, at 14:13 UTC, Bybit lost approximately $1.5 billion in a single transaction. It was the largest DeFi hack in history. The attack did not exploit a bug in Ethereum, in Safe's smart contracts, or in Bybit's key management. It exploited the one gap nobody was watching: the moment between signing and broadcast.
+
+This is that gap. This is what yevm-gate is for.
+
+### What happened
+
+Bybit operated its cold wallet as a Safe multisig — three signers, Ledger hardware wallets, standard institutional setup. On February 21st, they initiated a routine transfer of ~401,000 ETH from cold to hot wallet.
+
+The Lazarus Group had already compromised a Safe{Wallet} developer's machine weeks earlier. They injected malicious JavaScript into Safe's AWS S3 bucket serving the frontend. The payload was surgical — it only activated for transactions from Bybit's specific Safe address. For every other user, Safe{Wallet} worked normally.
+
+When Bybit's signers opened the Safe UI, it displayed a legitimate-looking transfer. Their Ledger devices received a completely different payload. What they actually signed was transaction `0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882` — a call to `upgradeTo()` replacing the Safe proxy's implementation contract with a malicious one under attacker control. The implementation address, `0xbDd077f651EBe7f7b3cE16fe5F2b025BE2969516`, had never been used before on Ethereum. Zero prior on-chain activity. Deployed fresh two days earlier.
+
+Three signers approved. The transaction broadcast. Fifteen minutes later, $1.5B was gone.
+
+### Why nothing caught it
+
+Every existing security tool operates at one of two moments:
+
+**Pre-sign** — Pocket Universe, Blockaid, WalletGuard simulate what a transaction is *about* to do and warn the user before they sign. The Safe UI was compromised. These tools see what the UI shows them. The UI showed a legitimate transfer. They passed.
+
+**Post-broadcast** — Etherscan, explorers, monitoring services. By the time these see the transaction, it's on-chain. Too late.
+
+Nobody sits in between. After signing, every tool assumes the transaction is going out. The signed bytes — the actual payload that was signed, not what the UI displayed — are never independently verified before they hit the mempool.
+
+```text
+[pre-sign tools]  ──▶  [YOU SIGN]  ──▶  [yevm-gate]  ──▶ submit ──▶ [broadcast]
+                                             │
+                                             └────────── remove ──▶ [dropped]
+
+                                        ↑
+                              (the gap that existed)
+```
+
+That is the gap.
+
+### What yevm-gate does differently
+
+yevm-gate is a transaction proxy that intercepts the signed raw transaction *before* broadcast and holds it until the user explicitly submits it.
+
+Instead of calling `eth_sendRawTransaction` directly on the network, the wallet routes through yevm-gate. The gate stores the raw signed bytes in SQLite. The user authenticates via Sign-In-With-Ethereum — no accounts, no passwords. The gate's web UI pulls the raw transaction and runs a full EVM simulation *entirely in the browser* via WebAssembly against any standard RPC endpoint the user provides.
+
+The simulation runs against the actual signed bytes — not what any UI claims the transaction does. Not what the dApp says. The raw EVM execution trace, decoded by `yevm-lens` into human-readable side effects.
+
+For the Bybit transaction, here is what the simulation would have shown:
+
+```text
+⚠ PROXY IMPLEMENTATION SWAP DETECTED
+upgradeTo(0xbDd077f651EBe7f7b3cE16fe5F2b025BE2969516)
+
+⚠ NEVER-TOUCHED ADDRESS
+0xbDd077f651EBe7f7b3cE16fe5F2b025BE2969516
+nonce: 0 · deployed: Feb 19 2025 · first seen: this transaction
+```
+
+[![yevm-gate catching the Bybit exploit tx — proxy implementation replaced](/assets/2026-09-05-yevm-gate/tx.jpg)](https://yevm.0xff.wtf/?tx=0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882)
+
+The Safe UI showed a routine ETH transfer. yevm-gate would have shown a proxy implementation swap to an address that had never existed before this transaction. The operator clicks Remove. The transaction is deleted from the gate, never broadcast. $1.5B stays in the wallet.
+
+### How to use it
+
+yevm-gate sits in front of your wallet's RPC connection, so setup is a one-time config change, not a new wallet:
+
+1. **Replace the RPC URL in your wallet** with `https://gate.0xff.wtf/rpc` for Ethereum, or `https://gate.0xff.wtf/rpc/{chainId}` for EVM-equivalent networks (Base, Arbitrum, Optimism).
+2. **Send a transaction from your wallet as usual.** Your wallet signs it and calls `eth_sendRawTransaction` against what it thinks is the network RPC. The gate intercepts that call, decodes and stores the raw signed bytes, and returns a transaction hash immediately — the wallet has no idea the transaction didn't actually go out.
+3. **Open the gate in a browser** (`gate.0xff.wtf`, or your own deployment) and authenticate. There's no account or password: the gate issues a nonce, your wallet signs it (Sign-In-With-Ethereum), and the signature is your session. Only the address that signed the pending transaction — or a configured admin — can see and act on it.
+4. **Review the simulation.** The gate lists your pending transactions, each with the full decoded side effects computed by simulating the actual signed bytes: ETH and ERC-20/721 balance changes, approvals, proxy implementation swaps, never-touched-address warnings.
+5. **Click Submit or Remove.** Submit forwards the exact raw bytes you originally signed to the real upstream RPC — broadcast happens now, not when your wallet first called `eth_sendRawTransaction`. Remove deletes the pending transaction from the gate. Nothing was ever exposed to the mempool, so there's nothing to cancel on-chain — it simply never existed as far as the network is concerned.
+
+That's the whole loop: the wallet is never modified and never knows the gate is there, but every outgoing transaction now has a human checkpoint, backed by ground-truth simulation, between signature and broadcast.
+
+### Try it yourself
+
+yevm-gate is live at **[gate.0xff.wtf](https://gate.0xff.wtf)**.
+
+The Bybit exploit transaction hash is:
+`0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882`
+
+**Option A — command line.** yevm-gate intercepts `eth_sendRawTransaction` at the RPC level. You can submit the Bybit exploit transaction directly from the terminal:
+
+Pull the raw signed transaction bytes from the chain:
+
+```bash
+RAW=$(curl -s https://eth.llamarpc.com \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "eth_getRawTransactionByHash",
+    "params": ["0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882"]
+  }' | jq -r '.result')
+```
+
+Submit it to yevm-gate instead of the network:
+
+```bash
+curl -s https://gate.0xff.wtf/rpc \
+  -X POST \
+  -H "Content-Type: application/json" \
+  -d "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_sendRawTransaction\",\"params\":[\"$RAW\"]}"
+```
+
+The gate intercepts `eth_sendRawTransaction`, stores the raw bytes, and holds the transaction pending your review. Open **[gate.0xff.wtf](https://gate.0xff.wtf)**, authenticate via Sign-In-With-Ethereum, and look at the simulation. The proxy implementation swap and never-touched address warning fire exactly as they would have for Bybit's signers — had this tool existed. Click Remove instead of Submit and it's over — the transaction never reaches a real RPC node.
+
+You can also run yevm-gate locally — `cargo run -p yevm-gate` with `YEVM_RPC_URL` pointed at an archive node — and point the same commands at `http://localhost:8000` instead.
+
+**Option B — replay directly with yevm.** `yevm` can replay the Bybit exploit transaction directly in the browser — open this link (an archive node with February 2025 state is required for the RPC endpoint you provide):
+
+**[yevm.0xff.wtf/?tx=0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882](https://yevm.0xff.wtf/?tx=0x46deef0f52e3a983b67abf4714448a41dd7ffd6d32d32da69d62081c68ad7882)**
+
+### How it works
+
+yevm-gate is built on `yevm` — a full Ethereum VM implementation written from scratch in Rust. It passes 99.6% of Ethereum's GeneralStateTests (Cancun fork) and is cross-validated against `revm` on Osaka/Fusaka mainnet traffic.
+
+The execution engine compiles to WebAssembly via `yevm-wasm`. This means simulation runs client-side in the browser — not on the gate server, not on any third-party infrastructure. The server stores your signed transaction bytes and handles authentication. The EVM runs in your browser tab, fetching only the state it needs from the RPC endpoint you provide. Your transaction data never leaves your control.
+
+`yevm-lens` sits on top of the execution trace and decodes side effects: ETH balance changes, ERC-20/721 transfers, approvals, proxy implementation swaps. Every address touched during execution is cross-referenced against on-chain history — zero prior activity triggers the never-touched address warning.
+
+The full stack:
+
+- **`yevm-core`** — async-first EVM, yields on every state access, lazy RPC fetching
+- **`yevm-wasm`** — compiles core to WASM, runs in browser and any WASM runtime
+- **`yevm-lens`** — semantic decoder, side effects and address heuristics
+- **`yevm-gate`** — Axum/Rust server, SQLite, SIWE auth, post-sign proxy
+
+### The bigger picture
+
+The Bybit hack was not an anomaly. It was a proof of concept for an entire class of supply-chain attacks that exploit the post-sign gap:
+
+- Compromise the signing UI
+- Show the user a legitimate transaction
+- Sign a different payload
+- Broadcast before anyone notices
+
+Safe UI, MetaMask extension, any wallet with a compromised frontend — the attack surface is the UI layer. The signed bytes are the ground truth. yevm-gate verifies the ground truth.
+
+Every commercial alternative operates either pre-sign on centralized infrastructure, or post-broadcast when it is already too late. yevm-gate runs post-sign, pre-broadcast, entirely client-side.
+
+---
+
+**Disclaimer.** yevm-gate is a research project, not an audited production system. Use it to learn, to instrument, to prototype — not, on its own, to gate a treasury.
+
+**License.** yevm is licensed under PolyForm Noncommercial — free for educational use, personal projects, research, and any other non-commercial use.
+
+Source code: [github.com/sergey-melnychuk/yevm](https://github.com/sergey-melnychuk/yevm). Live demo: [gate.0xff.wtf](https://gate.0xff.wtf). Prior post: [I built EVM from scratch. Again.]({{ site.url }}{% post_url 2026-05-23-yevm %}).
